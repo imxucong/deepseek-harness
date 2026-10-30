@@ -1,0 +1,34 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write product/README.md
+/topask-product-assembly:
+  en: 8a7e783e0f1f5016
+  zh: ac22d3ee9c870c5c
+/topask-product-assembly/layers:
+  en: 9a175ca55eb35d09
+  zh: 37b9e21c5698a6de
+/topask-product-assembly/quick-start:
+  en: b602b9e152a15fc5
+  zh: d2503a7921692d2b
+/topask-product-assembly/what-stays-deepseek:
+  en: 2721996ff4380a86
+  zh: a15f352914eaae87
+/topask-product-assembly/files:
+  en: 4c32dcc4ca09cfff
+  zh: dbdf74a05a062187
+/topask-product-assembly/distribution:
+  en: 0f9633130e3d8062
+  zh: 22701a599ee11fe0
+/topask-product-assembly/updating-upstream:
+  en: b16b30b43eaa4b15
+  zh: ef6444fcf84c85eb
+/topask-product-assembly/remaining-deepseek-branded-surfaces:
+  en: 3b2bdb923d3c2aa8
+  zh: f868616e8ede48ab
+/topask-product-assembly/desktop-and-packaging:
+  en: 20f22e96121e6125
+  zh: 334e634cb847eb13
+/topask-product-assembly/brand-and-license:
+  en: b15cb63850d27a19
+  zh: 85059c5b92dd0956

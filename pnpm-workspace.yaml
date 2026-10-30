@@ -7,6 +7,8 @@ packages:
   - native/system/packages/*
   # Product assemblies over the package tier; apps/cli owns the `dsh` bin.
   - apps/*
+  # TopAsk white-label bundle and browser brand.
+  - product/dsh-topask
   # Private package owning repository-level benchmark dependencies.
   - benchmarks
   - website

@@ -1,0 +1,15 @@
+# TopAsk white-label layer over the shipped web profile.
+#
+# The DeepSeek kernel stays as shipped: model routes, account, tools,
+# persistence, and telemetry rows are untouched. This layer replaces brand
+# presentation only, so it applies after dsh-base and dsh-web-app.
+#
+# A patch replaces a targeted row's whole config; these operations either
+# disable a row or insert a new one, so no existing config is restated.
+
+- id: ui-brand-official
+  disabled: true
+
+- insert:
+    - id: topask-brand
+      name: '@topask/dsh-topask'
