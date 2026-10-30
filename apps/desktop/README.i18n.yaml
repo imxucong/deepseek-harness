@@ -12,17 +12,17 @@
   en: 7bc8bf30de693222
   zh: e85993d8852b6cab
 /topask-desktop/table-of-contents:
-  en: 05fd227f99ee535a
-  zh: 60d7d62bc0026973
+  en: 127ea90553cb6af7
+  zh: 7b1c5aec8558c684
 /topask-desktop/application-overview:
-  en: 7ba0d92e2b035a70
-  zh: 5d5c7d0fa93f397e
+  en: a5864f60024cba60
+  zh: b8a824646a0af7bd
 /topask-desktop/terminal-command:
   en: 5f2d25a1d8472647
   zh: 2acb5c5d7d1917e2
 /topask-desktop/closing-the-window-and-quitting:
-  en: 1da3b5d88e7f2fab
-  zh: fa2b8b5825a24291
+  en: f03d92c8332acddf
+  zh: d253790dfa44ccb0
 /topask-desktop/key-technical-decisions:
   en: 3724c53da4f7647b
   zh: 76ae549d43c99bb4
@@ -33,20 +33,20 @@
   en: 372297005b57a08b
   zh: 074a635ac17e4362
 /topask-desktop/installation-ownership:
-  en: 22153a298a6662e1
-  zh: 3600803c8c9d0274
+  en: 160b500cdcd6a39a
+  zh: 6c267f1762ec3689
 /topask-desktop/installation-ownership/runtime-and-plugin-activation:
-  en: e2a8d9d9b2b594f3
-  zh: 63a409c773bf3266
+  en: 4951cd3ee659eb33
+  zh: 96bdd6358dad587a
 /topask-desktop/installation-ownership/host-environment:
   en: 98cf848762482d48
   zh: 74f9100a39ec8c2f
 /topask-desktop/develop:
-  en: fe6d23e6a3d3bc66
-  zh: d60c8d3a55747916
+  en: faf7676ba18bbf2f
+  zh: f1d7b75ad348c548
 /topask-desktop/develop/startup-onboarding:
-  en: a51346b8d880ddba
-  zh: 7913214c1c66063c
+  en: 67dc7ef3e293236a
+  zh: 1b224db684a2d1d7
 /topask-desktop/develop/welcome-window-appearance:
   en: 617a89aeb28131b9
   zh: 4d84bd5d86501c86
@@ -54,26 +54,26 @@
   en: ac31ebdd9de54f34
   zh: 921e534d5c4b3a16
 /topask-desktop/windows-installer-interface:
-  en: 8cb4b7babbd8714d
-  zh: b4aebc1d2d152e01
+  en: 9b90a2651a6d2b52
+  zh: 86d4d9c4358aad80
 /topask-desktop/updates:
-  en: 4788b6b60489ef92
-  zh: 6312c5590efa27f1
+  en: 67bf0a18faa7aa76
+  zh: 782e14ce62bb939f
 /topask-desktop/updates/local-desktop-settings:
   en: 2e57457c44c85b5f
   zh: 5b8510a3dc4c6c9d
 /topask-desktop/updates/mandatory-update-policy:
-  en: 54596bef0706d305
-  zh: 48737302dcf3c939
+  en: 182a9c6705213e13
+  zh: 681762f83490f4c6
 /topask-desktop/updates/local-updater-qualification:
-  en: 68ec2f8bd5763ea6
-  zh: 23b932dfe8503602
+  en: db5e898140a73d53
+  zh: 80a9d58c74b4bb24
 /topask-desktop/low-level-development-overrides:
   en: 8264b135871e8978
   zh: 0939aafb1b2961fc
 /topask-desktop/known-limitations:
-  en: b0033378af0039e8
-  zh: 5e4dd4539f30de98
+  en: 7fcfb6ee71194b7e
+  zh: 66c7504415fe0164
 /topask-desktop/dev-note:
   en: 8e26b460ba31f21b
   zh: fbcd0307b3867125
