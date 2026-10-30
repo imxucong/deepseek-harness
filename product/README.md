@@ -14,6 +14,7 @@ TopAsk is packaged as a white-label composition over the shipped DeepSeek Harnes
 | TopAsk client plugin | `product/dsh-topask/src/client` | Fills the sidebar and hero brand slots |
 | Product profile | `$DSH_HOME/profiles/topask` | Appends the TopAsk bundle last |
 | Desktop profile | `$DSH_HOME/profiles/desktop` | Application bundle list includes TopAsk; the development profile links the package into its plugin root |
+| Brand assets | `product/assets/` | TopAsk logo source and generated icon artwork |
 | Web assets | `apps/web/public` | TopAsk favicon and manifest |
 
 ## Quick start
@@ -45,7 +46,8 @@ To replace the model route later, patch `agent-default-model` and `llm-pi-ai` in
 | Path | Purpose |
 |---|---|
 | `dsh-topask/` | The bundle + browser brand package |
-| `assets/` | TopAsk favicon sources |
+| `assets/` | TopAsk logo source and Desktop icon-shell templates |
+| `apply-logo.mjs` | Generate favicons, Desktop icons, welcome lockup, and installer artwork |
 | `build.sh` | Build harness artifacts and the TopAsk package |
 | `init-profile.sh` | Create the profile, link the bundle, verify composition |
 | `run.sh` | Start the profile with an isolated Harness home |
@@ -62,9 +64,23 @@ To replace the model route later, patch `agent-default-model` and `llm-pi-ai` in
 
 The published package carries the prebuilt `lib/index.js`, `lib/client.js`, `cordis.patch.yml`, and locale metadata, so consumers need no TypeScript toolchain.
 
+## Brand assets
+
+`product/assets/topask-logo.svg` is the master logo. `product/apply-logo.mjs` inlines its internal references for browser rendering, writes the Desktop icon shells from `product/assets/desktop-icon*.svg`, and regenerates the Web favicon, Desktop PNGs, welcome lockup, and installer artwork.
+
+After changing the logo or an upstream icon shell:
+
+```sh
+node product/apply-logo.mjs
+product/sync-web-assets.sh
+pnpm --dir apps/desktop run render:tray-icon
+pnpm --filter @deepseek-ai/dsh-web-frontend run render:app-icons
+DSH_CLIENT_TITLE=TopAsk pnpm run build
+```
+
 ## Updating upstream
 
-The TopAsk diff now spans two layers. Composition stays in `product/` plus the two Web asset files and the `pnpm-workspace.yaml` entry. Fork-level brand-name edits live in `apps/desktop` (locale, development bundle, electron-builder display name, welcome artwork) and in the client locale dictionaries that own first-run, account, plugin safety, and document-preview copy. Keep those edits grouped and re-apply them after an upstream locale change; the bundle/profile layer remains the only composition change.
+The TopAsk diff now spans two layers. Composition and brand assets stay in `product/` plus the generated Web app icons and the `pnpm-workspace.yaml` entry. Fork-level brand-name edits live in `apps/desktop` (locale, development bundle, electron-builder display name, welcome artwork) and in the client locale dictionaries that own first-run, account, plugin safety, and document-preview copy. Keep those edits grouped and re-apply them after an upstream locale change; the bundle/profile layer remains the only composition change.
 
 ## Remaining DeepSeek-branded surfaces
 
@@ -74,18 +90,15 @@ The product name is TopAsk across the Web shell, first-run onboarding, preview n
 |---|---|---|
 | DeepSeek account onboarding | `packages/client/ui-settings-account/src/client/locales.ts` | Says "Sign in to your DeepSeek account"; keep while the kernel uses DeepSeek accounts |
 | Official provider onboarding | `packages/client/ui-settings-models/src/client/locales.ts` | Configures the official DeepSeek provider; keep while the kernel uses DeepSeek model routes |
-| Desktop icons and artwork | `apps/desktop/resources/` | Still the upstream mark; replace it with TopAsk artwork when final assets are ready |
-| Release artifact filenames and update feed | `apps/desktop/scripts/`, `apps/desktop/publishing/` | Artifact names remain `deepseek-harness-*` and the update feed remains the upstream channel until TopAsk release infrastructure exists |
+| Release update feed | `apps/desktop/publishing/` | The update feed remains the upstream channel until TopAsk release infrastructure exists; artifact filenames are now `topask-*` |
 
 The locale registry rejects a second registration of the same namespace and locale, so the product name is changed in the owning locale dictionaries instead of being overlaid from the TopAsk package. Re-apply those fork edits after an upstream locale change.
 
 ## Desktop and packaging
 
-The Desktop product name is TopAsk: electron-builder uses `productName: 'TopAsk'`, the protocol display name is TopAsk, the development bundle is `TopAsk Dev.app`, and menu, about, welcome, and tray copy is TopAsk. The development desktop profile adds `@topask/dsh-topask` to its application bundle list and links the package into the profile's plugin resolution root. Three packaging items remain:
+The Desktop product name and identity are TopAsk: electron-builder uses `productName: 'TopAsk'` and the local unsigned build id `com.topask.app`, the protocol display name is TopAsk, the development bundle is `TopAsk Dev.app`, and menu, about, welcome, and tray copy is TopAsk. The packaging flow builds and packs `product/dsh-topask` beside the dsh family and unpacks it from `app.asar`, so packaged builds load the TopAsk bundle; the development profile links the same package into its plugin root. Brand icons, tray, welcome, and installer artwork are generated from `product/assets/topask-logo.svg` via `product/apply-logo.mjs`. One packaging item remains:
 
-1. Add the private `@topask/dsh-topask` tarball to the Desktop runtime package set; `createRuntimeProjectMetadata` enables the bundle automatically once the package set contains it.
-2. Replace `apps/desktop/resources/icon*.svg` and regenerate the PNG and ICO variants.
-3. Decide whether release artifact filenames and the update feed move from `deepseek-harness-*` and upstream channels to TopAsk's own infrastructure; the example app id is already `com.topask.app`.
+1. Point the auto-update feed at TopAsk's release infrastructure; artifact filenames are already `topask-*`.
 
 ## Brand and license
 

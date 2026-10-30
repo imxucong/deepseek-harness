@@ -54,6 +54,6 @@ DSH_HOME="${DSH_HOME:-$HOME/.topask}" pnpm dsh plugin --profile topask \
 
 - The Web document title is a build-time value; changing it requires rebuilding client artifacts.
 - `TopAsk` renders as a proper noun rather than a translated string. Moving this package under `packages/client` would bring it into `verify-client-ui-i18n`, which requires locale-owned copy.
-- Desktop product name, app id, artifact name, protocol scheme, and icons are owned by `apps/desktop`. The Desktop profile includes this bundle for the Web client brand, while packaging identifiers stay in `apps/desktop`.
-- A packaged Desktop build needs this package in its runtime package set; the development profile links it automatically.
+- Desktop product name, app id, artifact name, and protocol scheme are owned by `apps/desktop`. The Desktop profile includes this bundle for the Web client brand; icon and installer artwork come from `product/assets/topask-logo.svg` via `product/apply-logo.mjs`.
+- The Desktop packaging flow includes this package in its runtime package set and unpacks it from `app.asar`; the development profile links it automatically.
 - This layer assumes the `web` profile. A headless, SDK, or ACP profile has no browser brand slot to fill, but mounting the bundle is harmless.

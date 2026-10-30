@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1254" height="1254"
+     viewBox="0 0 1254 1254">
+  <defs>
+    <!-- 主体蓝紫渐变 -->
+    <linearGradient id="bodyGradient"
+      x1="17%" y1="8%" x2="94%" y2="92%">
+      <stop offset="0%" stop-color="#25E3F8"/>
+      <stop offset="30%" stop-color="#209EFD"/>
+      <stop offset="65%" stop-color="#295BFD"/>
+      <stop offset="100%" stop-color="#7952FD"/>
+    </linearGradient>
+
+    <!-- 底部深蓝渐变 -->
+    <linearGradient id="depthGradient"
+      x1="15%" y1="5%" x2="35%" y2="100%">
+      <stop offset="0%" stop-color="#16DFF9"
+        stop-opacity="0"/>
+      <stop offset="50%" stop-color="#145BFC"
+        stop-opacity=".07"/>
+      <stop offset="100%" stop-color="#1845F6"
+        stop-opacity=".38"/>
+    </linearGradient>
+
+    <!-- 紫色柔光 -->
+    <radialGradient id="purpleGlow"
+      cx="95%" cy="76%" r="70%">
+      <stop offset="0%" stop-color="#AA5FFF"
+        stop-opacity=".36"/>
+      <stop offset="100%" stop-color="#AA5FFF"
+        stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- 顶部柔和亮面 -->
+    <linearGradient id="topWave"
+      x1="5%" y1="5%" x2="95%" y2="95%">
+      <stop offset="0%" stop-color="#40F1F9"
+        stop-opacity=".24"/>
+      <stop offset="60%" stop-color="#39C5FF"
+        stop-opacity=".16"/>
+      <stop offset="100%" stop-color="#1F7BFF"
+        stop-opacity=".12"/>
+    </linearGradient>
+
+    <!-- 下方波纹 -->
+    <linearGradient id="bottomWave"
+      x1="0%" y1="100%" x2="100%" y2="15%">
+      <stop offset="0%" stop-color="#1448F9"
+        stop-opacity=".16"/>
+      <stop offset="100%" stop-color="#C16AFB"
+        stop-opacity=".20"/>
+    </linearGradient>
+
+    <!-- 眼睛白色渐变 -->
+    <linearGradient id="eyeGradient"
+      x1="15%" y1="0%" x2="85%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="68%" stop-color="#F9FBFF"/>
+      <stop offset="100%" stop-color="#DDEBFF"/>
+    </linearGradient>
+
+    <!-- 消息气泡外轮廓 -->
+    <path id="bubbleShape" d="
+      M 643 222
+      C 846 221 1014 329 1048 502
+      C 1080 656 1047 789 951 881
+      C 868 961 728 990 558 955
+      C 484 940 466 942 391 973
+      C 345 994 295 1020 261 1006
+      C 226 992 246 966 270 920
+      C 293 876 301 844 287 813
+      C 272 780 238 751 222 698
+      C 194 612 194 535 225 450
+      C 288 300 446 222 643 222 Z
+    "/>
+
+    <clipPath id="bubbleClip">
+      <use href="#bubbleShape"/>
+    </clipPath>
+  </defs>
+
+  <!-- 气泡主体 -->
+  <use href="#bubbleShape"
+       fill="url(#bodyGradient)"/>
+
+  <!-- 气泡内部渐变及波纹 -->
+  <g clip-path="url(#bubbleClip)">
+    <rect x="194" y="218"
+      width="876" height="794"
+      fill="url(#depthGradient)"/>
+
+    <rect x="194" y="218"
+      width="876" height="794"
+      fill="url(#purpleGlow)"/>
+
+    <path d="
+      M 195 741
+      C 238 617 339 528 464 489
+      C 588 447 664 470 757 447
+      C 859 420 911 353 960 289
+      L 1058 215 L 197 215 Z
+    " fill="url(#topWave)"/>
+
+    <path d="
+      M 233 1007
+      C 321 913 411 839 532 797
+      C 663 752 806 780 915 754
+      C 1013 731 1055 664 1083 614
+      L 1095 1042 L 225 1042 Z
+    " fill="url(#bottomWave)"/>
+  </g>
+
+  <!-- 左眼 -->
+  <ellipse cx="512" cy="615"
+    rx="60" ry="83"
+    fill="url(#eyeGradient)"/>
+
+  <!-- 右眼 -->
+  <ellipse cx="781" cy="618"
+    rx="55" ry="81"
+    fill="url(#eyeGradient)"/>
+</svg>

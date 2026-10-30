@@ -402,7 +402,7 @@ async function main(): Promise<void> {
   if (success && target.platform === 'darwin' && !invocation.directory && !invocation.prepareOnly) {
     const paths = desktopTargetBuildPaths(target.name, environment)
     const output = desktopArtifactOutput(paths, invocation)
-    const filename = `deepseek-harness-${buildVersion}-mac-${target.arch}${output.suffix}.dmg`
+    const filename = `topask-${buildVersion}-mac-${target.arch}${output.suffix}.dmg`
     console.log(`DMG: ${join(output.directory, filename)}`)
   }
 }
@@ -495,6 +495,16 @@ export async function packageTarget(
     await executePreparation([
       '--dir',
       'apps/desktop-host',
+      'pack',
+      '--pack-destination',
+      buildPaths.packedDsh,
+    ], buildEnv, REPOSITORY_ROOT)
+    // The private product bundle is outside the published dsh family; build and
+    // pack it beside the host so the runtime package-set closure can resolve it.
+    await executePreparation(['--filter', '@topask/dsh-topask', 'run', 'build'], buildEnv, REPOSITORY_ROOT)
+    await executePreparation([
+      '--dir',
+      'product/dsh-topask',
       'pack',
       '--pack-destination',
       buildPaths.packedDsh,

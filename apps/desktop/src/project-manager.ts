@@ -52,9 +52,15 @@ function workspaceFile(overrides: Readonly<Record<string, string>> = {}): string
   return `packages:\n  - .\n\n${overrideSection}${WORKSPACE_SETTINGS}allowBuilds:\n  node-pty: true\n  koffi: true\n  fs-ext: true\n  ${JSON.stringify(coreBuildKey)}: true\n  '@google/genai': false\n  protobufjs: false\n  node-addon-require-builtin: false\n`
 }
 
+/** Resolve the runtime root that owns real files, preferring the asar-unpacked sibling. */
+function unpackedRuntimeRoot(runtimeDsh: string): string {
+  const unpacked = runtimeDsh.replace(/app\.asar(?=$|[\\/])/u, 'app.asar.unpacked')
+  return unpacked !== runtimeDsh && existsSync(unpacked) ? unpacked : runtimeDsh
+}
+
 /** Link the application-owned brand bundle into the profile's plugin resolution root. */
 function linkApplicationBundle(profileDir: string, runtimeDsh: string): void {
-  const source = join(runtimeDsh, 'node_modules', ...DESKTOP_PRODUCT_BUNDLE.split('/'))
+  const source = join(unpackedRuntimeRoot(runtimeDsh), 'node_modules', ...DESKTOP_PRODUCT_BUNDLE.split('/'))
   if (!existsSync(join(source, 'package.json'))) return
   const destination = join(profileDir, 'node_modules', ...DESKTOP_PRODUCT_BUNDLE.split('/'))
   mkdirSync(join(profileDir, 'node_modules', ...DESKTOP_PRODUCT_BUNDLE.split('/').slice(0, -1)), { recursive: true })

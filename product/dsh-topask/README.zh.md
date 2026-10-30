@@ -54,6 +54,6 @@ DSH_HOME="${DSH_HOME:-$HOME/.topask}" pnpm dsh plugin --profile topask \
 
 - Web 文档标题是构建期值；修改后需要重新构建客户端产物。
 - `TopAsk` 作为专有名词渲染，而不是翻译字符串。若把本包移动到 `packages/client` 下，它会进入 `verify-client-ui-i18n` 的检查范围，届时需要使用 locale 字典。
-- 桌面产品名、app id、产物名、协议 scheme 与图标归 `apps/desktop` 所有。Desktop profile 会包含本 bundle 以提供 Web 客户端品牌，而打包标识仍留在 `apps/desktop`。
-- 打包 Desktop 需要把本包加入其运行时包集；开发 profile 会自动链接它。
+- 桌面产品名、app id、产物名与协议 scheme 归 `apps/desktop` 所有。Desktop profile 会包含本 bundle 以提供 Web 客户端品牌；图标与安装器素材由 `product/apply-logo.mjs` 从 `product/assets/topask-logo.svg` 生成。
+- Desktop 打包流程会把本包加入其运行时包集并从 `app.asar` 解包；开发 profile 会自动链接它。
 - 本层假设使用 `web` profile。headless、SDK 或 ACP profile 没有可填充的浏览器品牌槽位，但挂载该组合层是无害的。
