@@ -111,9 +111,21 @@ function localPath(url: URL): string {
   return `${url.pathname}${url.search}`
 }
 
+function sameOrigin(req: IncomingMessage, config: Config): boolean {
+  const origin = req.headers.origin
+  if (origin === undefined) return true
+  if (origin === config.origin) return true
+  const host = req.headers.host
+  if (host === undefined) return false
+  try {
+    const requestOrigin = new URL(origin)
+    return requestOrigin.host === host && requestOrigin.protocol === new URL(config.origin).protocol
+  } catch { return false }
+}
+
 function postAllowed(req: IncomingMessage, res: ServerResponse, config: Config, session: OperatorSession,
   form: URLSearchParams): boolean {
-  if (req.headers.origin !== undefined && req.headers.origin !== config.origin) {
+  if (!sameOrigin(req, config)) {
     sendHtml(res, 403, failurePage('请求来源不匹配，请重试。'))
     return false
   }
@@ -177,7 +189,7 @@ async function oidcCallback(req: IncomingMessage, res: ServerResponse, config: C
 
 async function devLogin(req: IncomingMessage, res: ServerResponse, config: Config, now: number): Promise<void> {
   if (!config.devLogin || config.devOperator === undefined) { sendHtml(res, 404, failurePage('未启用开发登录。')); return }
-  if (req.headers.origin !== undefined && req.headers.origin !== config.origin) {
+  if (!sameOrigin(req, config)) {
     sendHtml(res, 403, failurePage('请求来源不匹配。'))
     return
   }

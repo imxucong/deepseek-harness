@@ -149,6 +149,14 @@ describe('operator console', () => {
     expect(anonymous.status).toBe(302)
     expect(anonymous.headers.get('location')).toContain('/login')
 
+    const aliased = await fetch(`${base}/auth/dev-login`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ returnTo: '/' }),
+    })
+    expect(aliased.status).toBe(302)
+
     const login = await fetch(`${base}/auth/dev-login`, {
       method: 'POST',
       redirect: 'manual',
