@@ -12,9 +12,9 @@ Status: implemented
 
 `@topask/platform` 拥有公开的 platform origin。它通过账户 API 的内部端点读取登录尝试事实并渲染授权页，提供 `/`、`/usage`、`/top_up`，用一个同源脚本读取 Desktop 桥接的 token，并把 `/auth-api/**` 与 `/api/**` 代理到 `@topask/api`；`/internal/**` 永远不会被代理。
 
-`@topask/api` 保留 Platform 兼容的 JSON 协议，并增加受 token 保护的内部登录尝试端点。它仍是 SQLite 的唯一所有者；平台和未来的运营后台都不直接读数据库。
+`@topask/api` 保留 Platform 兼容的 JSON 协议，并增加受 token 保护的内部登录尝试端点。它仍是 SQLite 的唯一所有者，包括钱包、赠金账本与运营审计；平台和运营后台都不直接读数据库。
 
-授权页留在 platform origin，并保持零脚本与 `default-src 'none'`。运营后台将是独立应用与独立域名，使用 OIDC/SSO；它不能承载这些页面，因为客户端要求配置的 platform origin 与固定的授权路径。
+授权页留在 platform origin，并保持零脚本与 `default-src 'none'`。`@topask/admin` 是独立域名上的独立应用。它通过 OIDC/SSO 登录运营人员，把共享 admin token 保留在 BFF 中，并调用账户 API 的 `/admin-api/**` 端点管理用户、授权、设备、登录尝试、钱包、赠金与审计。它不能承载授权页，因为客户端要求配置的 platform origin 与固定的授权路径。
 
 ## 备选方案
 
@@ -26,4 +26,4 @@ Status: implemented
 
 ## 后果
 
-开发时需要运行两个进程（`dev:api` 与 `dev:platform`），共享一个内部 token。平台页面依赖 Desktop 桥接获取账户 token；普通 Web 标签页目前没有平台会话。用量明细、支付与钱包写入仍然推迟。拆分让运营后台能够增加 OIDC 与管理 API，而不触碰授权页面或客户端协议。
+开发时需要运行三个进程（`dev:api`、`dev:platform` 与 `dev:admin`），共享服务 token。平台页面依赖 Desktop 桥接获取账户 token；普通 Web 标签页目前没有平台会话。用量明细与支付仍然推迟。运营后台增加了 OIDC 与管理 API，而不触碰授权页面或客户端协议。钱包调整与账号停用立即生效；目前没有支付渠道或角色划分。

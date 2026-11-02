@@ -240,6 +240,7 @@
     "apps/plugin-market-generator/tests/**/*.ts",
     "apps/topask-api/tests/**/*.ts",
     "apps/topask-platform/tests/**/*.ts",
+    "apps/topask-admin/tests/**/*.ts",
     "apps/desktop/scripts/**/*.ts",
     "apps/desktop/tests/**/*.ts",
     "apps/desktop-host/tests/**/*.ts",
@@ -594,6 +595,7 @@
     { "path": "./apps/plugin-market-generator" },
     { "path": "./apps/topask-api" },
     { "path": "./apps/topask-platform" },
+    { "path": "./apps/topask-admin" },
     { "path": "./apps/desktop-host" },
     { "path": "./apps/desktop/tsconfig.host.json" }
   ]

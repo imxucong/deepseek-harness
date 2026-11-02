@@ -65,7 +65,7 @@ const publishedRepositoryUrl = 'git+https://github.com/deepseek-ai/deepseek-harn
 /** Packages that participate in the experimental policy. */
 const experimentalPackageDirectory = /^packages\/experimental\/[^/]+$/
 /** Private applications run from the repository; they publish no files. */
-const privateApplicationDirectories = ['apps/plugin-market-generator', 'apps/topask-api', 'apps/topask-platform'] as const
+const privateApplicationDirectories = ['apps/plugin-market-generator', 'apps/topask-api', 'apps/topask-platform', 'apps/topask-admin'] as const
 /**
  * Ordinary directories whose packages this repository publishes: one release member each. The private
  * applications above are repository tools, not published applications.

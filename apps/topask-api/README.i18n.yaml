@@ -6,23 +6,26 @@
   en: 91d762e807748e43
   zh: 9f3bb4bf3e72482b
 /topask-api/summary:
-  en: ec32209485806e1e
-  zh: 889e7b85f795b01c
+  en: 9f9b49171b9e0ebc
+  zh: e3e43982de5eb11f
 /topask-api/endpoints:
   en: 8be943f128efeb42
   zh: cf202dc6b4102036
 /topask-api/endpoints/internal-endpoints:
   en: 59a8252a7ac3f44a
   zh: 6bd4d2baf0d86dd4
+/topask-api/endpoints/operator-endpoints:
+  en: d902341328bf342e
+  zh: 0e202aa360176074
 /topask-api/configuration:
-  en: 2e5f0fd8ac07f749
-  zh: 835b9b9844c935c8
+  en: 41c89a603b519e6e
+  zh: 0d838d1c61a8edf5
 /topask-api/connect-a-profile:
   en: bc81de74ded6baef
   zh: 5fd6af1dfc1791b4
 /topask-api/security:
-  en: 6e87ebe3e1337e51
-  zh: 724ca25f699a86b3
+  en: 241ffa372727d6b3
+  zh: f22c1cf1b9d368e7
 /topask-api/known-limitations-and-deferred-work:
-  en: cf5c1b8530d8ee34
-  zh: f7ffc1829abdd9ce
+  en: 759e6be2a5adf6ab
+  zh: 719fc9ce960fb170

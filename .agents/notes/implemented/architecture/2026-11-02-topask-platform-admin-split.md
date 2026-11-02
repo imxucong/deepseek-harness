@@ -12,9 +12,9 @@ The account client reaches browser surfaces at the configured platform origin: `
 
 `@topask/platform` owns the public platform origin. It renders the authorization pages from attempt facts read through the account API's internal endpoints, serves `/`, `/usage`, and `/top_up` with one same-origin script that reads the Desktop bridge token, and proxies `/auth-api/**` and `/api/**` to `@topask/api`. `/internal/**` is never proxied.
 
-`@topask/api` keeps the Platform-compatible JSON protocol and adds the token-protected internal attempt endpoints. It owns the SQLite store; neither the platform nor a future console reads the database directly.
+`@topask/api` keeps the Platform-compatible JSON protocol and adds the token-protected internal attempt endpoints. It owns the SQLite store, including wallets, the bonus ledger, and the operator audit log; neither the platform nor the console reads the database directly.
 
-The authorization pages stay on the platform origin and remain script-free with `default-src 'none'`. The operator console will be a separate application and domain with OIDC/SSO; it cannot host these pages because the client requires the configured platform origin and the fixed authorization paths.
+The authorization pages stay on the platform origin and remain script-free with `default-src 'none'`. `@topask/admin` is a separate application on its own domain. It signs operators in through OIDC/SSO, keeps the shared admin token in its BFF, and calls the account API's `/admin-api/**` endpoints for users, grants, devices, login attempts, wallets, bonuses, and audit. It cannot host the authorization pages because the client requires the configured platform origin and the fixed authorization paths.
 
 ## Alternatives considered
 
@@ -26,4 +26,4 @@ The authorization pages stay on the platform origin and remain script-free with 
 
 ## Consequences
 
-Development runs two processes (`dev:api` and `dev:platform`) with a shared internal token. The platform pages depend on the Desktop bridge for an account token; a plain Web tab has no platform session yet. Usage detail, payment, and wallet mutation remain deferred. The split lets the operator console add OIDC and management APIs without touching the authorization surface or the client protocol.
+Development runs three processes (`dev:api`, `dev:platform`, and `dev:admin`) with shared service tokens. The platform pages depend on the Desktop bridge for an account token; a plain Web tab has no platform session yet. Usage detail and payment remain deferred. The operator console adds OIDC and management APIs without touching the authorization surface or the client protocol. Wallet adjustments and account disabling are immediate; there is no payment channel or role split yet.

@@ -6,7 +6,7 @@ TopAsk's account protocol service. It implements the account protocol the shippe
 
 ## Summary
 
-The service is a standalone Node program, not a Cordis application and not a `dsh` profile. It listens on HTTP, keeps accounts and grants in SQLite, and exposes the Platform-compatible endpoints listed below. Development builds sign in one configured identity; a real identity source replaces only the platform's authorize page. Browser pages live in `@topask/platform` at the configured platform origin, so this service returns JSON only.
+The service is a standalone Node program, not a Cordis application and not a `dsh` profile. It listens on HTTP, keeps accounts, grants, wallets, and operator audit in SQLite, and exposes the Platform-compatible endpoints listed below. Development builds sign in one configured identity; a real identity source replaces only the platform's authorize page. Browser pages live in `@topask/platform` at the configured platform origin, so this service returns JSON only. The operator console talks to `/admin-api/**` through `@topask/admin`.
 
 ## Endpoints
 
@@ -33,12 +33,33 @@ The platform app reads and completes one attempt through these endpoints. Both r
 | `GET` | `/internal/attempts/:authorizeId` | Read the identity, state, and expiry the consent page renders |
 | `POST` | `/internal/attempts/:authorizeId/decision` | Approve (returning the Host callback redirect) or deny one attempt |
 
+### Operator endpoints
+
+The operator console calls these during a signed-in OIDC session. Every request requires `x-topask-admin-token` plus the operator identity headers `x-topask-operator-subject` and `x-topask-operator-email`; mutations append an audit record. Disabling an account blocks new sign-ins and rejects its existing grants.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/admin-api/overview` | User, grant, device, and attempt counts |
+| `GET` | `/admin-api/users` | Search and page users |
+| `GET` | `/admin-api/users/:id` | One user with its wallet and bonuses |
+| `POST` | `/admin-api/users/:id/disabled` | Disable or re-enable one account |
+| `GET` | `/admin-api/grants` | Search and page grants |
+| `DELETE` | `/admin-api/grants/:tokenHash` | Revoke one grant |
+| `GET` | `/admin-api/devices` | Page recorded devices |
+| `GET` | `/admin-api/attempts` | Page sign-in attempts with their status |
+| `GET` | `/admin-api/wallets` | Page wallets |
+| `GET` | `/admin-api/wallets/:userId` | One wallet with the bonus ledger |
+| `POST` | `/admin-api/wallets/:userId/balance` | Set the normal balance |
+| `POST` | `/admin-api/wallets/:userId/bonuses` | Grant a bonus notice and add it to the bonus total |
+| `GET` | `/admin-api/audit` | Page operator actions |
+
 ## Configuration
 
 | Variable | Required | Meaning |
 |---|---|---|
 | `TOPASK_PLATFORM_ORIGIN` | yes | Public platform origin browsers and the account provider use; HTTPS, or loopback HTTP for development |
 | `TOPASK_INTERNAL_TOKEN` | yes | Shared secret the platform app presents on internal endpoints |
+| `TOPASK_ADMIN_TOKEN` | yes | Shared secret the operator console's BFF presents on admin endpoints |
 | `TOPASK_API_PORT` | no | Listen port; `8790` by default, `0` requests an OS-assigned port |
 | `TOPASK_API_HOST` | no | Listen address; `127.0.0.1` by default |
 | `TOPASK_API_DATA_DIR` | no | SQLite directory; `.topask-api` by default |
@@ -49,12 +70,12 @@ The platform app reads and completes one attempt through these endpoints. Both r
 Run it from the repository:
 
 ```sh
-TOPASK_PLATFORM_ORIGIN=http://127.0.0.1:8791 TOPASK_INTERNAL_TOKEN=development pnpm --filter @topask/api start
+TOPASK_PLATFORM_ORIGIN=http://127.0.0.1:8791 TOPASK_INTERNAL_TOKEN=development TOPASK_ADMIN_TOKEN=development pnpm --filter @topask/api start
 ```
 
 From the repository root, `pnpm run dev:api` runs the service in watch mode with the committed `.env.development` defaults; process environment values take precedence.
 
-The database file is `$TOPASK_API_DATA_DIR/account.sqlite`. It stores users, devices, sign-in attempts, and token hashes; raw tokens are never stored. Logout deletes the presented grant.
+The database file is `$TOPASK_API_DATA_DIR/account.sqlite`. It stores users, devices, sign-in attempts, token hashes, wallets, bonus entries, and operator audit; raw tokens are never stored. Logout deletes the presented grant. The schema follows `PRAGMA user_version` (currently 2); opening an earlier database adds the disabled flag, grant creation time, and the wallet, bonus-ledger, and audit tables.
 
 ## Connect a profile
 
@@ -74,12 +95,12 @@ Model requests still target the configured inference origin, so keep an API-key 
 
 ## Security
 
-The API accepts only loopback callback URIs with an explicit port and a known `/oauth/callback` path. An authorization code is single-use, bound to one redirect URI and PKCE challenge, and expires with its attempt. The service logs no tokens. The platform app renders the consent page and posts decisions here with the internal token; that token never reaches a browser. The platform's authorize page carries a restrictive content security policy and submits its form to the platform origin, which redirects to the Host's loopback callback on another port.
+The API accepts only loopback callback URIs with an explicit port and a known `/oauth/callback` path. An authorization code is single-use, bound to one redirect URI and PKCE challenge, and expires with its attempt. The service logs no tokens. The platform app renders the consent page and posts decisions here with the internal token; that token never reaches a browser. The platform's authorize page carries a restrictive content security policy and submits its form to the platform origin, which redirects to the Host's loopback callback on another port. Admin requests require the separate admin token and an operator identity; disabling an account blocks new attempts and rejects its existing grants, and every mutation appends an audit record.
 
 ## Known Limitations and Deferred Work
 
 - The only identity source is the development user; there is no password, SMS, or OIDC sign-in yet.
-- Wallet balances are fixed at zero and bonus notices are always empty.
+- Wallet balances and bonus notices are operator-managed through the admin API; there is no payment channel yet.
 - Tokens have no refresh endpoint; the client re-authenticates after HTTP 401.
 - The client-side provider split that offers both DeepSeek and TopAsk sign-in is not part of this package.
 - Browser pages, platform home, usage, and top-up live in `@topask/platform`, not here.
