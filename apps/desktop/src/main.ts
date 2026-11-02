@@ -45,6 +45,7 @@ import { pruneCrashReports, RendererConsoleTail, writeCrashReport, type CrashRep
 import { OperationJournal } from './operation-journal.ts'
 import { runOperationReportJob, type OperationReportJobResult } from './operation-report-job.ts'
 import { openWelcomeWindow } from './welcome-window.ts'
+import type { AccountProviderId, AccountView } from '@deepseek-ai/dsh-deepseek-account/types'
 import { WELCOME_IPC, needsWelcome, type WelcomeNotice } from './welcome-api.ts'
 import { connectDesktopWelcome, type DesktopWelcomeBackend } from './welcome-backend.ts'
 import { DesktopUpdateJournal } from './update-journal.ts'
@@ -488,7 +489,7 @@ async function main(): Promise<void> {
   let openedAttempt: string | undefined
   let returnedAttempt: string | undefined
   let pendingWelcomeNotice: WelcomeNotice | undefined
-  let previousAccountStatus: string | undefined
+  const previousAccountStatuses = new Map<AccountProviderId, AccountView['status']>()
   const assertProductSender = (event: IpcMainInvokeEvent): BrowserWindow => {
     assertDesktopSender(event, ['app'])
     if (mainWindow === undefined || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents
@@ -538,9 +539,11 @@ async function main(): Promise<void> {
         if (!reportedLaunch) { reportedLaunch = true; void track('desktop_app_launch', {}) }
         stopAccount?.()
         const accountBackend = welcomeBackend.account
-        stopAccount = accountBackend.watch((state) => {
+        stopAccount = accountBackend.watch((provider, state) => {
           if (quitting) return
-          if (welcomeWindow !== undefined && !welcomeWindow.isDestroyed()) welcomeWindow.webContents.send(WELCOME_IPC.state, state)
+          if (welcomeWindow !== undefined && !welcomeWindow.isDestroyed()) {
+            welcomeWindow.webContents.send(WELCOME_IPC.state, provider, state)
+          }
           const attempt = state.attempt
           if (attempt?.phase === 'waiting-browser' && attempt.authorizeUrl !== undefined && openedAttempt !== attempt.id) {
             openedAttempt = attempt.id
@@ -551,27 +554,33 @@ async function main(): Promise<void> {
             focusPrimaryWindow()
           }
           if (state.status === 'credential-stored' && attempt?.phase === 'succeeded' && welcomeWindow !== undefined) void enterWorkspace({ activate: false }).catch(() => undefined)
-          if (previousAccountStatus === 'credential-stored' && state.status === 'signed-out') {
+          const wasStored = [...previousAccountStatuses.values()].includes('credential-stored')
+          previousAccountStatuses.set(provider, state.status)
+          const anyStored = [...previousAccountStatuses.values()].includes('credential-stored')
+          if (wasStored && !anyStored) {
             void readWelcomeState().then(async (value) => {
               if (needsWelcome(value) && !quitting) {
                 enteredWorkspace = false
                 await showWelcome()
-                if (welcomeWindow !== undefined && !welcomeWindow.isDestroyed()) welcomeWindow.webContents.send(WELCOME_IPC.state, state)
+                if (welcomeWindow !== undefined && !welcomeWindow.isDestroyed()) {
+                  welcomeWindow.webContents.send(WELCOME_IPC.state, provider, state)
+                }
               }
               return undefined
             }).catch(() => undefined)
           }
-          previousAccountStatus = state.status
         }, () => {
           // The stream reconnects; a transport failure does not change account state.
-        }, () => {
+        }, (provider) => {
           void readWelcomeState().then(async (value) => {
             if (!needsWelcome(value) || quitting) return
             pendingWelcomeNotice = 'session-expired'
             enteredWorkspace = false
             await showWelcome()
-            const state = await accountBackend.state()
-            if (welcomeWindow !== undefined && !welcomeWindow.isDestroyed()) welcomeWindow.webContents.send(WELCOME_IPC.state, state)
+            const state = await accountBackend.state(provider)
+            if (welcomeWindow !== undefined && !welcomeWindow.isDestroyed()) {
+              welcomeWindow.webContents.send(WELCOME_IPC.state, provider, state)
+            }
           }).catch(() => undefined)
         }, (enabled) => { analyticsEnabled = enabled })
       },
@@ -1256,16 +1265,20 @@ async function main(): Promise<void> {
           pendingWelcomeNotice = undefined
           return Promise.resolve(notice)
         },
-        startSignIn: async () => {
+        providers: async () => {
           if (welcomeBackend === undefined) throw new Error('desktop welcome: backend unavailable')
-          return welcomeBackend.account.start(desktopClientMetadata(locale.id))
+          return welcomeBackend.account.providers()
         },
-        cancelSignIn: async (id) => {
+        startSignIn: async (provider) => {
           if (welcomeBackend === undefined) throw new Error('desktop welcome: backend unavailable')
-          return welcomeBackend.account.cancel(id)
+          return welcomeBackend.account.start(desktopClientMetadata(locale.id), provider)
         },
-        copySignInLink: async (id) => {
-          const state = await welcomeBackend?.account.state()
+        cancelSignIn: async (provider, id) => {
+          if (welcomeBackend === undefined) throw new Error('desktop welcome: backend unavailable')
+          return welcomeBackend.account.cancel(id, provider)
+        },
+        copySignInLink: async (provider, id) => {
+          const state = await welcomeBackend?.account.state(provider)
           if (state?.attempt?.id !== id || state.attempt.phase !== 'waiting-browser' || state.attempt.authorizeUrl === undefined) {
             throw new Error('desktop welcome: login link is unavailable')
           }
@@ -1282,10 +1295,15 @@ async function main(): Promise<void> {
       })
       const window = welcomeWindow
       window.once('closed', () => {
-        void welcomeBackend?.account.state().then((state) => {
-          if (state.attempt !== null && !enteredWorkspace) return welcomeBackend?.account.cancel(state.attempt.id)
-          return undefined
-        }).catch(() => undefined)
+        void (async () => {
+          const backend = welcomeBackend
+          if (backend === undefined) return
+          const providers = await backend.account.providers().catch(() => [])
+          for (const provider of providers) {
+            const state = await backend.account.state(provider).catch(() => undefined)
+            if (state?.attempt != null && !enteredWorkspace) await backend.account.cancel(state.attempt.id, provider)
+          }
+        })().catch(() => undefined)
       })
       window.once('closed', () => {
         if (welcomeWindow === window) welcomeWindow = undefined

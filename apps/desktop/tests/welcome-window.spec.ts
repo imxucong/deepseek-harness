@@ -1,3 +1,4 @@
+import type { AccountProviderId } from '@deepseek-ai/dsh-deepseek-account/types'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { resolveDesktopLocale } from '../src/locale.ts'
@@ -42,6 +43,7 @@ beforeEach(() => { electron.create.mockReset(); electron.handlers.clear() })
 const operations = {
   analyticsEnabled: async () => true,
   takeNotice: async () => undefined,
+  providers: async (): Promise<AccountProviderId[]> => ['deepseek'],
   startSignIn: async () => ({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out' as const, attempt: null }),
   cancelSignIn: async () => ({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out' as const, attempt: null }),
   copySignInLink: async () => undefined,
@@ -134,10 +136,11 @@ describe('desktop welcome window', () => {
     await electron.handlers.get(WELCOME_IPC.skip)!(own)
     expect(skip).toHaveBeenCalledOnce()
     const copy = electron.handlers.get(WELCOME_IPC.copyLink)!
-    await expect(copy({ ...own, senderFrame: {} }, 'attempt')).rejects.toThrow('unowned frame')
-    await expect(copy(own, 42)).rejects.toThrow('invalid attempt')
-    await copy(own, 'attempt')
-    expect(copySignInLink).toHaveBeenCalledExactlyOnceWith('attempt')
+    await expect(copy({ ...own, senderFrame: {} }, 'deepseek', 'attempt')).rejects.toThrow('unowned frame')
+    await expect(copy(own, 'deepseek', 42)).rejects.toThrow('invalid attempt')
+    await expect(copy(own, 'bogus', 'attempt')).rejects.toThrow('invalid provider')
+    await copy(own, 'deepseek', 'attempt')
+    expect(copySignInLink).toHaveBeenCalledExactlyOnceWith('deepseek', 'attempt')
     window.once.mock.calls[0]![1]()
     expect(electron.handlers.size).toBe(0)
   })
@@ -173,7 +176,7 @@ describe('desktop welcome window', () => {
     await expect(currentHandler(previousSender)).rejects.toThrow('unowned frame')
     previous.once.mock.calls[0]![1]()
     expect(electron.handlers.get(WELCOME_IPC.start)).toBe(currentHandler)
-    await currentHandler({ sender: current.webContents, senderFrame: current.webContents.mainFrame })
+    await currentHandler({ sender: current.webContents, senderFrame: current.webContents.mainFrame }, 'deepseek')
     expect(currentStart).toHaveBeenCalledOnce()
     expect(previousStart).not.toHaveBeenCalled()
     current.once.mock.calls[0]![1]()

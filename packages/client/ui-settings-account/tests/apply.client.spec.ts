@@ -332,14 +332,14 @@ for (const desktop of [false, true]) it(`uses the browser or Desktop login carri
   const c = await start()
   const actions = operations(c)
   mock.remote.account.startSignIn.mockResolvedValue(ok(view))
-  await actions.start()
-  expect(mock.remote.account.startSignIn).toHaveBeenCalledWith(expect.objectContaining({ locale: 'en', version: '0.0.0-test' }),
+  await actions.start('deepseek')
+  expect(mock.remote.account.startSignIn).toHaveBeenCalledWith('deepseek', expect.objectContaining({ locale: 'en', version: '0.0.0-test' }),
     window.location.origin, desktop ? 'desktop' : 'web')
   // Only a plain browser preopens the authorization tab during the click.
   expect(open).toHaveBeenCalledTimes(desktop ? 0 : 1)
   const failure = { ok: false as const, error: new RemoteError('gateway/internal', 'offline', {}) }
   mock.remote.account.startSignIn.mockResolvedValueOnce(failure)
-  await expect(actions.start()).rejects.toThrow('account start failed')
+  await expect(actions.start('deepseek')).rejects.toThrow('account start failed')
   expect(actions.hooks.account.getSnapshot()).toMatchObject({ loginVisible: true, loginFailed: true })
   const id = 'cancel-me' as SignInAttemptId
   mock.remote.account.cancelSignIn.mockResolvedValueOnce(ok(view)).mockResolvedValueOnce(failure)
@@ -360,7 +360,7 @@ it('navigates the preopened browser tab to the themed authorization page', async
   const actions = operations(c)
   const attempt = { id: 'attempt' as SignInAttemptId, phase: 'waiting-browser' as const, authorizeUrl: 'https://platform.deepseek.com/dsh/authorize' }
   mock.remote.account.startSignIn.mockResolvedValue(ok({ ...view, attempt: { id: attempt.id, phase: 'initializing' } }))
-  await actions.start()
+  await actions.start('deepseek')
   c.mock.streams.push('account/watch', { ...view, attempt })
   const theme = (c.ctx.get('theme') as ThemeRuntime).getTheme().active.colorScheme
   await vi.waitFor(() => { expect(replace).toHaveBeenCalledExactlyOnceWith(`${attempt.authorizeUrl}?theme=${theme}`) })
@@ -396,8 +396,8 @@ it('uses the Desktop stream origin and exposes the native platform bridge', asyn
   expect(host.hooks.page.getSnapshot()).toBeNull()
   expect(owner).toHaveBeenCalledExactlyOnceWith('returned')
   mock.remote.account.startSignIn.mockResolvedValue(ok(view))
-  await actions.start()
-  expect(mock.remote.account.startSignIn).toHaveBeenCalledWith(expect.objectContaining({ locale: 'en' }), 'http://localhost:9876', 'desktop')
+  await actions.start('deepseek')
+  expect(mock.remote.account.startSignIn).toHaveBeenCalledWith('deepseek', expect.objectContaining({ locale: 'en' }), 'http://localhost:9876', 'desktop')
 }, 60_000)
 
 
@@ -538,12 +538,12 @@ it('reads the unnotified bonus in the active locale and acknowledges only after 
   await vi.waitFor(() => {
     expect(actions.hooks.account.getSnapshot().notices?.[0]).toMatchObject({ orderId, message: 'Awarded 5.00' })
   })
-  expect(c.mock.remote.account.getUnnotifiedBonuses).toHaveBeenCalledWith(expect.objectContaining({ locale: 'en' }))
+  expect(c.mock.remote.account.getUnnotifiedBonuses).toHaveBeenCalledWith('deepseek', expect.objectContaining({ locale: 'en' }))
   // A successful read is not a display, so nothing may be acknowledged yet.
   expect(c.mock.remote.account.ackBonusNotified).not.toHaveBeenCalled()
   actions.bonusNoticeShown(orderId as AccountBonusOrderId)
   await vi.waitFor(() => {
-    expect(c.mock.remote.account.ackBonusNotified).toHaveBeenCalledWith('account-user', orderId, expect.objectContaining({ locale: 'en' }))
+    expect(c.mock.remote.account.ackBonusNotified).toHaveBeenCalledWith('deepseek', 'account-user', orderId, expect.objectContaining({ locale: 'en' }))
   })
   actions.bonusNoticeDismissed(orderId as AccountBonusOrderId)
   expect(actions.hooks.account.getSnapshot().notices?.[0]).toBeUndefined()
@@ -630,7 +630,7 @@ it('refreshes balances and the bonus read on one Settings entry, without polling
   expect(c.mock.remote.account.getBalance).toHaveBeenCalledTimes(balances + 1)
   expect(c.mock.remote.account.getUnnotifiedBonuses).toHaveBeenCalledTimes(2)
   // The bonus read carries the active UI language.
-  expect(c.mock.remote.account.getUnnotifiedBonuses).toHaveBeenLastCalledWith(expect.objectContaining({ locale: 'en' }))
+  expect(c.mock.remote.account.getUnnotifiedBonuses).toHaveBeenLastCalledWith('deepseek', expect.objectContaining({ locale: 'en' }))
 }, 60_000)
 
 it('publishes a failed balance from a Settings entry without dropping the bonus read', async ({ start }) => {
@@ -684,13 +684,13 @@ it('samples the build version, language, and UTC offset for every account call',
   c.mock.remote.account.getUnnotifiedBonuses.mockResolvedValue(ok(null))
   c.mock.streams.push('account/watch', stored)
   await vi.waitFor(() => { expect(c.mock.remote.account.getUnnotifiedBonuses).toHaveBeenCalledTimes(1) })
-  expect(c.mock.remote.account.getUnnotifiedBonuses).toHaveBeenLastCalledWith({
+  expect(c.mock.remote.account.getUnnotifiedBonuses).toHaveBeenLastCalledWith('deepseek', {
     version: '0.0.0-test', locale: 'en', timezoneOffsetSeconds: -28_800,
   })
   // The next call reads the zone again instead of reusing the first sample.
   offset.mockReturnValue(-300)
   await actions.refreshAccount()
-  expect(c.mock.remote.account.getUnnotifiedBonuses).toHaveBeenLastCalledWith({
+  expect(c.mock.remote.account.getUnnotifiedBonuses).toHaveBeenLastCalledWith('deepseek', {
     version: '0.0.0-test', locale: 'en', timezoneOffsetSeconds: 18_000,
   })
 }, 60_000)

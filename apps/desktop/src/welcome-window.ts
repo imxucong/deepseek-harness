@@ -1,4 +1,4 @@
-import type { SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
+import type { AccountProviderId, SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
 /** Native welcome window and its presentation-only renderer. */
 
 import { join } from 'node:path'
@@ -6,6 +6,12 @@ import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, ipcMain, type BrowserWindowConstructorOptions, type IpcMainInvokeEvent } from 'electron'
 import type { DesktopLocale } from './locale.ts'
 import { WELCOME_IPC, type WelcomeOperations } from './welcome-api.ts'
+
+/** Validate one account provider received from the sandboxed renderer. */
+function providerOf(value: unknown): AccountProviderId {
+  if (value !== 'deepseek' && value !== 'topask') throw new Error('desktop welcome: invalid provider')
+  return value
+}
 
 /**
  * Resolve the fixed-size welcome window's native material and controls.
@@ -66,7 +72,7 @@ export async function openWelcomeWindow(locale: DesktopLocale, operations: Welco
     active = false
     for (const channel of [
       WELCOME_IPC.analyticsEnabled, WELCOME_IPC.analytics, WELCOME_IPC.takeNotice, WELCOME_IPC.saveApiKey,
-      WELCOME_IPC.skip, WELCOME_IPC.start, WELCOME_IPC.cancel, WELCOME_IPC.copyLink,
+      WELCOME_IPC.skip, WELCOME_IPC.providers, WELCOME_IPC.start, WELCOME_IPC.cancel, WELCOME_IPC.copyLink,
     ]) {
       ipcMain.removeHandler(channel)
     }
@@ -102,16 +108,20 @@ export async function openWelcomeWindow(locale: DesktopLocale, operations: Welco
     assertSender(event)
     await operations.skip()
   })
-  ipcMain.handle(WELCOME_IPC.start, async (event) => { assertSender(event); return operations.startSignIn() })
-  ipcMain.handle(WELCOME_IPC.cancel, async (event, id: unknown) => {
+  ipcMain.handle(WELCOME_IPC.providers, async (event) => { assertSender(event); return operations.providers() })
+  ipcMain.handle(WELCOME_IPC.start, async (event, provider: unknown) => {
     assertSender(event)
-    if (typeof id !== 'string') throw new Error('desktop welcome: invalid attempt')
-    return operations.cancelSignIn(id as SignInAttemptId)
+    return operations.startSignIn(providerOf(provider))
   })
-  ipcMain.handle(WELCOME_IPC.copyLink, async (event, id: unknown) => {
+  ipcMain.handle(WELCOME_IPC.cancel, async (event, provider: unknown, id: unknown) => {
     assertSender(event)
     if (typeof id !== 'string') throw new Error('desktop welcome: invalid attempt')
-    return operations.copySignInLink(id as SignInAttemptId)
+    return operations.cancelSignIn(providerOf(provider), id as SignInAttemptId)
+  })
+  ipcMain.handle(WELCOME_IPC.copyLink, async (event, provider: unknown, id: unknown) => {
+    assertSender(event)
+    if (typeof id !== 'string') throw new Error('desktop welcome: invalid attempt')
+    return operations.copySignInLink(providerOf(provider), id as SignInAttemptId)
   })
   window.once('closed', disposeHandlers)
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))

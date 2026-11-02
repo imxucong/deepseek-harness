@@ -14,13 +14,19 @@ import { profile, readAccountDetail, readUnnotifiedBonuses, sendBonusNotified } 
 import { revokeAccount, type LogoutRetryPolicy } from './logout.ts'
 import { AccountUnauthorizedError, PlatformAuthError, platformHeaders, platformOrigin, browserUrl, requestPlatform, initialization, exchange, loginOrigin } from './protocol.ts'
 
-const KEY = credentialKey('deepseek-account-platform', 'default')
-const DEVICE = credentialKey('deepseek-account-platform', 'device')
 const grant = z.object({ version: z.literal(1), token: z.string().min(1), issuer: z.url() })
 const device = z.object({ id: z.uuid() })
 
 /** Deployment-specific platform and request deadlines. */
 export interface Config {
+  /** Cordis service key this provider registers; one provider per key. */
+  serviceKey?: 'deepseekAccount' | 'topaskAccount'
+  /** Credential-store scope holding this provider's grant and device records. */
+  credentialScope?: string
+  /** Browser callback path this provider registers on the Host web server. */
+  callbackPath?: string
+  /** Operator-facing label used by the authorization flow registry. */
+  providerLabel?: string
   /** Platform origin serving auth-api and browser pages. */
   platformOrigin?: string
   /** Native desktop identity for Host API and embedded Platform requests; null identifies the client as web. */
@@ -50,6 +56,10 @@ export interface Config {
 }
 /** Validated deployment choices. */
 export const Config = Schema.object({
+  serviceKey: Schema.union([Schema.const('deepseekAccount'), Schema.const('topaskAccount')]).default('deepseekAccount'),
+  credentialScope: Schema.string().default('deepseek-account-platform'),
+  callbackPath: Schema.string().default('/oauth/callback'),
+  providerLabel: Schema.string().default('DeepSeek'),
   platformOrigin: Schema.string().default('https://platform.deepseek.com'),
   desktopPlatform: Schema.union([Schema.const('darwin'), Schema.const('win32'), Schema.const(null)]).default(null),
   embeddedPageDist: Schema.string().default(''),
@@ -84,6 +94,10 @@ interface Attempt {
 export class PlatformAccount extends DeepSeekAccount {
   static inject = ['credentials', 'authorization']
   static Config = Config
+  private readonly key: ReturnType<typeof credentialKey>
+  private readonly deviceKey: ReturnType<typeof credentialKey>
+  private readonly callbackPath: string
+  private readonly providerLabel: string
   private readonly origin: string
   private readonly embeddedPageDist: string
   private readonly inferenceOrigin: string
@@ -110,9 +124,17 @@ export class PlatformAccount extends DeepSeekAccount {
 
   /** @param ctx - Host with authorization and credentials services. @param config - deployment options. */
   constructor(ctx: Context, config: Config = {}) {
-    super(ctx)
-    installAccountTaskCancellation(ctx)
     const resolved = Config(config)
+    super(ctx, resolved.serviceKey)
+    installAccountTaskCancellation(ctx)
+    this.key = credentialKey(resolved.credentialScope, 'default')
+    this.deviceKey = credentialKey(resolved.credentialScope, 'device')
+    if (!resolved.callbackPath.startsWith('/') || resolved.callbackPath === '/'
+      || /[\s?#]/u.test(resolved.callbackPath)) {
+      throw new Error('account: callbackPath must be an absolute path without whitespace, query, or fragment')
+    }
+    this.callbackPath = resolved.callbackPath
+    this.providerLabel = resolved.providerLabel
     this.embeddedPageDist = resolved.embeddedPageDist
     this.origin = platformOrigin(resolved.platformOrigin, resolved.allowLoopbackHttp)
     const inference = new URL(resolved.inferenceOrigin)
@@ -136,7 +158,7 @@ export class PlatformAccount extends DeepSeekAccount {
       maxRetries: resolved.logoutMaxRetries, delayMs: resolved.logoutRetryDelayMs, requestTimeoutMs: this.requestTimeout,
     }
     ctx.authorization.registerFlow({
-      key: KEY, label: 'DeepSeek', methods: [{ id: 'browser', label: 'DeepSeek' }],
+      key: this.key, label: this.providerLabel, methods: [{ id: 'browser', label: this.providerLabel }],
       run: (session) => {
         const attempt = this.attempt
         if (attempt === undefined) return Promise.reject(new PlatformAuthError('protocol'))
@@ -145,7 +167,7 @@ export class PlatformAccount extends DeepSeekAccount {
       },
     })
     ctx.on('credentials/record-updated', (key) => {
-      if (key !== KEY) return
+      if (key !== this.key) return
       this.invalidateDetails()
       this.changed()
     })
@@ -165,17 +187,17 @@ export class PlatformAccount extends DeepSeekAccount {
   }
 
   async [Service.init](): Promise<void> {
-    const record = await this.ctx.credentials.readRecord(KEY)
+    const record = await this.ctx.credentials.readRecord(this.key)
     if (record === undefined) return
     if (record.kind !== 'grant') throw new PlatformAuthError('storage')
     const parsed = grant.safeParse(record.payload)
     if (!parsed.success) throw new PlatformAuthError('storage')
     if (parsed.data.issuer === this.origin) return
-    await this.ctx.credentials.deleteRecord(KEY)
+    await this.ctx.credentials.deleteRecord(this.key)
   }
 
   override async getState(): Promise<AccountView> {
-    const record = await this.ctx.credentials.readRecord(KEY)
+    const record = await this.ctx.credentials.readRecord(this.key)
     if (record !== undefined && (record.kind !== 'grant' || !grant.safeParse(record.payload).success)) {
       throw new PlatformAuthError('storage')
     }
@@ -328,11 +350,11 @@ export class PlatformAccount extends DeepSeekAccount {
   private async expireCredential(token: string, lifetime: AbortController): Promise<void> {
     this.removing ??= (async () => {
       if (this.attempt !== undefined) await this.cancelSignIn(this.attempt.view.id)
-      const record = await this.ctx.credentials.readRecord(KEY)
+      const record = await this.ctx.credentials.readRecord(this.key)
       if (this.closed || this.detailsLifetime !== lifetime || record?.kind !== 'grant') return this.getState()
       const current = grant.parse(record.payload)
       if (current.token !== token || current.issuer !== this.origin) return this.getState()
-      await this.ctx.credentials.deleteRecord(KEY)
+      await this.ctx.credentials.deleteRecord(this.key)
       this.ctx.emit('deepseek-account/session-expired')
       this.attempt = undefined
       this.ctx.emit('deepseek-account/signed-out')
@@ -344,7 +366,7 @@ export class PlatformAccount extends DeepSeekAccount {
 
   override async getDeviceIdentity(): Promise<{ deviceId?: string; userId?: AccountUserId; osVersion: string }> {
     const [record, session] = await Promise.all([
-      this.ctx.credentials.readRecord(DEVICE),
+      this.ctx.credentials.readRecord(this.deviceKey),
       this.getPlatformSession(),
     ])
     const parsed = record?.kind === 'grant' ? device.safeParse(record.payload) : undefined
@@ -371,7 +393,7 @@ export class PlatformAccount extends DeepSeekAccount {
 
   private async readCurrentGrant(lifetime: AbortController): Promise<z.infer<typeof grant> | null> {
     if (this.closed) return null
-    const record = await this.ctx.credentials.readRecord(KEY)
+    const record = await this.ctx.credentials.readRecord(this.key)
     if (record === undefined || lifetime.signal.aborted) return null
     if (record.kind !== 'grant') throw new PlatformAuthError('storage')
     const parsed = grant.safeParse(record.payload)
@@ -385,7 +407,7 @@ export class PlatformAccount extends DeepSeekAccount {
     if (this.closed || this.removing !== undefined) return undefined
     const destination = new URL(url)
     if (destination.origin !== this.inferenceOrigin || destination.username || destination.password) return undefined
-    const record = await this.ctx.credentials.readRecord(KEY)
+    const record = await this.ctx.credentials.readRecord(this.key)
     if (record === undefined) return undefined
     if (record.kind !== 'grant') throw new PlatformAuthError('storage')
     const result = grant.safeParse(record.payload)
@@ -423,7 +445,7 @@ export class PlatformAccount extends DeepSeekAccount {
     }
     this.attempt = attempt
     attempt.done = this.ctx.authorization.begin({
-      key: KEY, signal: attempt.controller.signal,
+      key: this.key, signal: attempt.controller.signal,
       interaction: { notify: () => undefined, prompt: () => Promise.reject(new PlatformAuthError('protocol')) },
     }).then((outcome) => {
       this.update(attempt, { phase: outcome.status === 'authorized' ? 'succeeded' : 'cancelled' })
@@ -452,7 +474,7 @@ export class PlatformAccount extends DeepSeekAccount {
     if (attempt?.view.id === id) {
       if (attempt.view.phase !== 'committing') {
         attempt.controller.abort()
-        this.ctx.authorization.cancel(KEY)
+        this.ctx.authorization.cancel(this.key)
       }
       await attempt.done
     }
@@ -463,13 +485,13 @@ export class PlatformAccount extends DeepSeekAccount {
     this.removing ??= (async () => {
       if (this.closed) throw new PlatformAuthError('protocol')
       if (this.attempt !== undefined) await this.cancelSignIn(this.attempt.view.id)
-      const record = await this.ctx.credentials.readRecord(KEY)
+      const record = await this.ctx.credentials.readRecord(this.key)
       if (record !== undefined) {
         if (record.kind !== 'grant') throw new PlatformAuthError('storage')
         const parsed = grant.safeParse(record.payload)
         if (!parsed.success) throw new PlatformAuthError('storage')
         if (parsed.data.issuer !== this.origin) throw new PlatformAuthError('protocol')
-        await this.ctx.credentials.deleteRecord(KEY)
+        await this.ctx.credentials.deleteRecord(this.key)
         this.revoke(parsed.data.token, platformClientHeaders(this.platform, client))
       }
       this.attempt = undefined
@@ -537,7 +559,7 @@ export class PlatformAccount extends DeepSeekAccount {
     signal.addEventListener('abort', abort, { once: true })
     try {
       attempt.disposeCallback = this.ctx.effect(() => webServer.register({
-        kind: 'exact', path: '/oauth/callback', handler: (req, res) => {
+        kind: 'exact', path: this.callbackPath, handler: (req, res) => {
           let url: URL
           try { url = new URL(req.url ?? '/', 'http://127.0.0.1') }
           catch { res.writeHead(400, { 'cache-control': 'no-store' }).end(); return }
@@ -545,7 +567,7 @@ export class PlatformAccount extends DeepSeekAccount {
           const receivedState = url.searchParams.get('state') ?? ''
           const validState = Buffer.byteLength(receivedState) === Buffer.byteLength(state)
             && timingSafeEqual(Buffer.from(receivedState), Buffer.from(state))
-          if (req.method !== 'GET' || url.pathname !== '/oauth/callback' || !validState || !receivedCode
+          if (req.method !== 'GET' || url.pathname !== this.callbackPath || !validState || !receivedCode
             || url.searchParams.getAll('state').length !== 1 || url.searchParams.getAll('code').length !== 1) {
             res.writeHead(400, { 'cache-control': 'no-store' }).end(); return
           }
@@ -557,7 +579,7 @@ export class PlatformAccount extends DeepSeekAccount {
         },
       }), 'account: browser callback')
       signal.throwIfAborted()
-      const redirectUri = `${attempt.origin}/oauth/callback`
+      const redirectUri = `${attempt.origin}${this.callbackPath}`
       const init = initialization.safeParse(await this.request('auth_init', {
         code_challenge: challenge, code_challenge_method: 'S256', state, redirect_uri: redirectUri, locale: attempt.locale,
         login_source: attempt.loginSource,
@@ -576,7 +598,7 @@ export class PlatformAccount extends DeepSeekAccount {
       const receivedCode = await code.promise
       signal.throwIfAborted()
       this.update(attempt, { phase: 'exchanging' })
-      const deviceRecord = await this.ctx.credentials.modifyRecord(DEVICE, current => Promise.resolve(current === undefined
+      const deviceRecord = await this.ctx.credentials.modifyRecord(this.deviceKey, current => Promise.resolve(current === undefined
         ? { kind: 'grant', payload: { id: randomUUID() } } : undefined))
       if (deviceRecord?.kind !== 'grant') throw new PlatformAuthError('storage')
       const identity = device.parse(deviceRecord.payload)

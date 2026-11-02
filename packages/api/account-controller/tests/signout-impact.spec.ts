@@ -13,12 +13,12 @@ it('reports running account requests and excludes idle or unbound tasks', async 
   ctx.provide('agents', { list: () => active } as Context['agents'])
   const controller = new AccountController(ctx)
   try {
-    expect(controller.hasRunningAccountTasks()).toBe(false)
+    expect(controller.hasRunningAccountTasks('deepseek')).toBe(false)
     active.push(task('running'), task('running', 'deepseek-official'), task('idle', 'deepseek-account'))
-    expect(controller.hasRunningAccountTasks()).toBe(false)
+    expect(controller.hasRunningAccountTasks('deepseek')).toBe(false)
     active.push(task('running', 'deepseek-account'))
-    expect(controller.hasRunningAccountTasks()).toBe(true)
+    expect(controller.hasRunningAccountTasks('deepseek')).toBe(true)
     active.pop()
-    expect(controller.hasRunningAccountTasks()).toBe(false)
+    expect(controller.hasRunningAccountTasks('deepseek')).toBe(false)
   } finally { await ctx.fiber.dispose() }
 })

@@ -13,3 +13,19 @@
 - insert:
     - id: topask-brand
       name: '@topask/dsh-topask'
+
+    # TopAsk account provider: the same Platform protocol as the shipped
+    # DeepSeek row, mounted under its own service key and credential scope so
+    # both sign-in entries can coexist and either one can be disabled later.
+    - id: topask-account
+      name: '@deepseek-ai/dsh-deepseek-account-platform'
+      config:
+        serviceKey: topaskAccount
+        providerLabel: TopAsk
+        credentialScope: topask-account-platform
+        callbackPath: /oauth/topask/callback
+        platformOrigin: !!js process.env.TOPASK_API_ORIGIN ?? 'http://127.0.0.1:8790'
+        inferenceOrigin: !!js process.env.TOPASK_INFERENCE_ORIGIN ?? 'http://127.0.0.1:8790'
+        # Development default: the service runs on loopback HTTP. Production
+        # deployments use an HTTPS origin and set this to false.
+        allowLoopbackHttp: true

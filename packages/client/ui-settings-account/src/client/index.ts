@@ -10,7 +10,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-api-remote-access/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
-import type { AccountView, AccountDetails } from '@deepseek-ai/dsh-deepseek-account/types'
+import type { AccountView, AccountDetails, AccountProviderId } from '@deepseek-ai/dsh-deepseek-account/types'
 import type { OnboardingChange } from './onboarding-contract.ts'
 import type { PlatformBridge } from './PlatformOverlay.tsx'
 import { ContactConfig, CONTACT_CONFIG_GLOBAL } from '../contact-config.ts'
@@ -51,8 +51,21 @@ export function apply(ctx: Context): void {
   const page = globalThis as Partial<Record<typeof CONTACT_CONFIG_GLOBAL, unknown>>
   const config = ContactConfig(page[CONTACT_CONFIG_GLOBAL] ?? {})
   let snapshot: AccountSnapshot = {
-    view: undefined, details: undefined, avatar: undefined, failed: false, loginVisible: false, desktopOnboardingVisible: desktop,
+    view: undefined, details: undefined, avatar: undefined, failed: false, loginVisible: false,
+    desktopOnboardingVisible: desktop, provider: 'deepseek', providers: ['deepseek'],
   }
+  // One account is active at a time: the last provider the user chose, or the
+  // one currently holding credentials. Both streams update their own view.
+  let selectedProvider: AccountProviderId = 'deepseek'
+  let availableProviders: readonly AccountProviderId[] = ['deepseek']
+  const views = new Map<AccountProviderId, AccountView>()
+  const switching = new Set<AccountProviderId>()
+  const signedIn = (view: AccountView | undefined): boolean => view?.status === 'credential-stored'
+  const activeProvider = (): AccountProviderId =>
+    signedIn(views.get('topask')) ? 'topask' : signedIn(views.get('deepseek')) ? 'deepseek' : selectedProvider
+  const activeView = (): AccountView | undefined => views.get(activeProvider())
+  const activeState = (): Pick<AccountSnapshot, 'view' | 'provider' | 'providers'> =>
+    ({ view: activeView(), provider: activeProvider(), providers: availableProviders })
   // Desktop main opens the authorization page natively; a plain browser opens it in a tab it owns.
   const browser = new BrowserLogin(url => authorizeUrlWithTheme(url, ctx.theme.getTheme().active.colorScheme))
   ctx.effect(() => () => { browser.dispose() }, 'account: pending browser window')
@@ -70,12 +83,12 @@ export function apply(ctx: Context): void {
     ackRetryDelayMs: config.bonusAckRetryDelayMs,
     ackRetryMaxDelayMs: config.bonusAckRetryMaxDelayMs,
     read: async () => {
-      const result = await ctx.remote.account.getUnnotifiedBonuses(client())
+      const result = await ctx.remote.account.getUnnotifiedBonuses(activeProvider(), client())
       if (!result.ok) throw new Error('account bonus read failed')
       return result.value
     },
     acknowledge: async (accountId, orderId) => {
-      const result = await ctx.remote.account.ackBonusNotified(accountId, orderId, client())
+      const result = await ctx.remote.account.ackBonusNotified(activeProvider(), accountId, orderId, client())
       if (!result.ok) throw new Error('account bonus acknowledgement failed')
       return result.value
     },
@@ -87,8 +100,12 @@ export function apply(ctx: Context): void {
   ctx.effect(() => () => { notices.end() }, 'account: bonus notice lifetime')
   let revision = 0
   let refreshing: Promise<void> | undefined
+  // Desktop main opens the DeepSeek attempt natively; any other provider opens its
+  // authorization page through the window-open handler, which reaches the system browser.
+  let openedExternal: string | undefined
   const refresh = (): Promise<void> => {
-    if (snapshot.view?.status !== 'credential-stored') return Promise.resolve()
+    const provider = activeProvider()
+    if (views.get(provider)?.status !== 'credential-stored') return Promise.resolve()
     if (refreshing !== undefined) return refreshing
     const generation = revision
     const read = async <K extends keyof AccountDetails>(field: K,
@@ -101,13 +118,13 @@ export function apply(ctx: Context): void {
     }
     const request = Promise.all([
       read('profile', async () => {
-        const result = await ctx.remote.account.getProfile(client())
+        const result = await ctx.remote.account.getProfile(provider, client())
         if (!result.ok) throw new Error('account profile failed')
         if (generation === revision && result.value?.status === 'ready') avatar.setUrl(result.value.value.avatarUrl)
         return result.value
       }),
       read('balance', async () => {
-        const result = await ctx.remote.account.getBalance(client())
+        const result = await ctx.remote.account.getBalance(provider, client())
         if (!result.ok) throw new Error('account balance failed')
         return result.value
       }),
@@ -117,58 +134,96 @@ export function apply(ctx: Context): void {
     return request
   }
   ctx.effect(() => () => { revision++ }, 'account: details request lifetime')
-  // The account stream, and the reads it starts, follow access to this host's account state.
-  ctx.remoteAccess.whenAccess('account/watch', function* () {
-    const stream = ctx.remote.$stream<AccountView>({
-      name: 'account', open: signal => ctx.remote.account.watch(signal), ended: () => new Error('account stream ended'),
-    })
-    // Read across closures: the disposer ends this grant while the frame loop awaits.
-    const grant = { ended: false }
-    // Withdrawing access invalidates the reads this grant started, closes the
-    // pending authorization tab, and clears the account view and the sign-in
-    // dialog state, synchronously, so the next grant starts from no account
-    // state. `notices.end()` disposes this generation's notice lifetime, which a
-    // frame of this stream begins; the notice controller stays outside and
-    // begins again under the next grant.
-    yield () => {
-      grant.ended = true
-      revision++
-      refreshing = undefined
-      avatar.reset()
-      browser.dispose()
-      const { loginFailed: _loginFailed, ...current } = snapshot
-      publish({ ...current, view: undefined, details: undefined, avatar: undefined, failed: false, loginVisible: false })
-      notices.end()
-      return stream.dispose()
-    }
-    void (async () => {
-      for await (const frame of stream) {
-        // A frame the stream delivered before the revocation is not this grant's to apply.
-        if (grant.ended) return
+  // The account streams, and the reads they start, follow access to this host's
+  // account state. Each mounted provider keeps its own view; the snapshot
+  // exposes the active one.
+  const subscribe = (provider: AccountProviderId): void => {
+    ctx.remoteAccess.whenAccess('account/watch', function* () {
+      const stream = ctx.remote.$stream<AccountView>({
+        name: `account.${provider}`,
+        open: signal => ctx.remote.account.watch(provider, signal),
+        ended: () => new Error('account stream ended'),
+      })
+      // Read across closures: the disposer ends this grant while the frame loop awaits.
+      const grant = { ended: false }
+      // Withdrawing access invalidates the reads this grant started, closes the
+      // pending authorization tab, and clears the account view and the sign-in
+      // dialog state, synchronously, so the next grant starts from no account
+      // state. `notices.end()` disposes this generation's notice lifetime, which a
+      // frame of this stream begins; the notice controller stays outside and
+      // begins again under the next grant.
+      yield () => {
+        grant.ended = true
         revision++
         refreshing = undefined
         avatar.reset()
-        const initialize = frame.value.status === 'credential-stored' && frame.value.attempt?.phase === 'succeeded'
-          && snapshot.view?.attempt?.phase !== 'succeeded'
-        const { notices: previousNotices, ...previous } = snapshot
-        publish({ ...previous, view: frame.value, details: undefined, avatar: undefined, failed: false,
-          ...(frame.value.status === 'credential-stored' && previousNotices ? { notices: previousNotices } : {}) })
-        browser.update(frame.value)
-        frame.accept()
-        if (frame.value.status === 'credential-stored') notices.begin()
-        else notices.end()
-        if (initialize) void (async () => {
-          try {
-            const initialized = await ctx.remote.session.initializeDefaultModel()
-            if (!initialized.ok) console.error('[deepseek-account] default model initialization failed', { reason: 'refused' })
-          } catch (_error) {
-            console.error('[deepseek-account] default model initialization failed', { reason: 'disconnected' })
-          }
-        })()
-        void refresh()
+        browser.dispose()
+        views.delete(provider)
+        const { loginFailed: _loginFailed, ...current } = snapshot
+        publish({ ...current, ...activeState(), details: undefined, avatar: undefined, failed: false, loginVisible: false })
+        notices.end()
+        return stream.dispose()
       }
-    })().catch(() => { if (!grant.ended) publish({ ...snapshot, failed: true }) })
-  })
+      void (async () => {
+        for await (const frame of stream) {
+          // A frame the stream delivered before the revocation is not this grant's to apply.
+          if (grant.ended) return
+          const previousView = views.get(provider)
+          views.set(provider, frame.value)
+          if (frame.value.status === 'credential-stored') selectedProvider = provider
+          const active = activeProvider()
+          const isActive = active === provider
+          if (!isActive) { frame.accept(); continue }
+          revision++
+          refreshing = undefined
+          avatar.reset()
+          const initialize = frame.value.status === 'credential-stored' && frame.value.attempt?.phase === 'succeeded'
+            && previousView?.attempt?.phase !== 'succeeded'
+          const { notices: previousNotices, ...previous } = snapshot
+          publish({ ...previous, ...activeState(), details: undefined, avatar: undefined, failed: false,
+            ...(frame.value.status === 'credential-stored' && previousNotices ? { notices: previousNotices } : {}) })
+          browser.update(frame.value)
+          if (desktop && provider !== 'deepseek' && frame.value.attempt?.phase === 'waiting-browser'
+            && frame.value.attempt.authorizeUrl !== undefined && openedExternal !== frame.value.attempt.id) {
+            openedExternal = frame.value.attempt.id
+            window.open(authorizeUrlWithTheme(frame.value.attempt.authorizeUrl,
+              ctx.theme.getTheme().active.colorScheme), '_blank', 'noopener,noreferrer')
+          }
+          frame.accept()
+          if (frame.value.status === 'credential-stored') notices.begin()
+          else notices.end()
+          if (initialize) void (async () => {
+            try {
+              const initialized = await ctx.remote.session.initializeDefaultModel()
+              if (!initialized.ok) console.error('[deepseek-account] default model initialization failed', { reason: 'refused' })
+            } catch (_error) {
+              console.error('[deepseek-account] default model initialization failed', { reason: 'disconnected' })
+            }
+          })()
+          void refresh()
+          // Either-or: once this provider holds credentials, the other provider signs out.
+          if (frame.value.status === 'credential-stored') {
+            const other: AccountProviderId = provider === 'topask' ? 'deepseek' : 'topask'
+            if (availableProviders.includes(other) && signedIn(views.get(other)) && !switching.has(other)) {
+              switching.add(other)
+              void ctx.remote.account.signOut(other, client()).then((result) => {
+                if (!result.ok) console.error('[deepseek-account] switch sign-out failed', { provider: other })
+              }).finally(() => { switching.delete(other) })
+            }
+          }
+        }
+      })().catch(() => { if (!grant.ended) publish({ ...snapshot, failed: true }) })
+    })
+  }
+  // The DeepSeek provider ships in every composition; TopAsk joins when the Host reports it mounted.
+  subscribe('deepseek')
+  void Promise.resolve().then(() => ctx.remote.account.providers()).then((listed) => {
+    if (!listed.ok || listed.value.length === 0) return
+    availableProviders = listed.value
+    // Before the first frame the list travels with that frame; afterwards it needs its own publish.
+    if (snapshot.view !== undefined) publish({ ...snapshot, providers: availableProviders })
+    if (listed.value.includes('topask')) subscribe('topask')
+  }, () => undefined)
   const nativePlatform = (globalThis as typeof globalThis & { dshPlatform?: PlatformBridge }).dshPlatform
   // One request channel for the single native Platform view. It always exists
   // so every entry can observe whether a page is showing; only a native bridge
@@ -243,13 +298,14 @@ export function apply(ctx: Context): void {
         subscribe: listener => ctx.on('theme/change', listener),
       },
     },
-    async start() {
-      publish({ ...snapshot, loginVisible: true, loginFailed: false })
+    async start(provider: AccountProviderId) {
+      selectedProvider = provider
+      publish({ ...snapshot, ...activeState(), loginVisible: true, loginFailed: false })
       const transport = (globalThis as typeof globalThis & {
         __DSH_TRANSPORT__?: { streamBaseUrl?: string }
       }).__DSH_TRANSPORT__
       const request = async () => {
-        const result = await ctx.remote.account.startSignIn(client(),
+        const result = await ctx.remote.account.startSignIn(provider, client(),
           desktop && transport?.streamBaseUrl !== undefined ? new URL(transport.streamBaseUrl).origin : window.location.origin,
           desktop ? 'desktop' : 'web')
         if (!result.ok) throw new Error('account start failed')
@@ -257,20 +313,23 @@ export function apply(ctx: Context): void {
       }
       try {
         if (desktop) await request()
-        else await browser.start(request, () => snapshot.view)
+        else await browser.start(request, () => views.get(provider))
       } catch (error) {
         publish({ ...snapshot, loginFailed: true })
         throw error
       }
     },
-    async cancel(id) { const result = await ctx.remote.account.cancelSignIn(id); if (!result.ok) throw new Error('account cancel failed') },
+    async cancel(id) {
+      const result = await ctx.remote.account.cancelSignIn(activeProvider(), id)
+      if (!result.ok) throw new Error('account cancel failed')
+    },
     async hasRunningAccountTasks() {
-      const result = await ctx.remote.account.hasRunningAccountTasks()
+      const result = await ctx.remote.account.hasRunningAccountTasks(activeProvider())
       if (!result.ok) throw new Error('account task query failed')
       return result.value
     },
     async signOut() {
-      const result = await ctx.remote.account.signOut(client())
+      const result = await ctx.remote.account.signOut(activeProvider(), client())
       if (result.ok) return
       throw result.error
     },

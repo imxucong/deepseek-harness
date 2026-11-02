@@ -1,4 +1,4 @@
-import type { AccountView, SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
+import type { AccountProviderId, AccountView, SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
 /** Localized welcome copy and write-only credential actions. */
 
 import { contextBridge, ipcRenderer } from 'electron'
@@ -15,11 +15,17 @@ const api: WelcomeApi = {
   },
   analyticsEnabled: () => ipcRenderer.invoke(WELCOME_IPC.analyticsEnabled) as Promise<boolean>,
   takeNotice: () => ipcRenderer.invoke(WELCOME_IPC.takeNotice) as Promise<WelcomeNotice | undefined>,
-  startSignIn: () => ipcRenderer.invoke(WELCOME_IPC.start) as Promise<AccountView>,
-  cancelSignIn: (id: SignInAttemptId) => ipcRenderer.invoke(WELCOME_IPC.cancel, id) as Promise<AccountView>,
-  copySignInLink: (id: SignInAttemptId) => ipcRenderer.invoke(WELCOME_IPC.copyLink, id) as Promise<void>,
+  providers: () => ipcRenderer.invoke(WELCOME_IPC.providers) as Promise<AccountProviderId[]>,
+  startSignIn: (provider: AccountProviderId) =>
+    ipcRenderer.invoke(WELCOME_IPC.start, provider) as Promise<AccountView>,
+  cancelSignIn: (provider: AccountProviderId, id: SignInAttemptId) =>
+    ipcRenderer.invoke(WELCOME_IPC.cancel, provider, id) as Promise<AccountView>,
+  copySignInLink: (provider: AccountProviderId, id: SignInAttemptId) =>
+    ipcRenderer.invoke(WELCOME_IPC.copyLink, provider, id) as Promise<void>,
   onAccountState: (listener) => {
-    const receive = (_event: Electron.IpcRendererEvent, state: AccountView): void =>{  listener(state) }
+    const receive = (_event: Electron.IpcRendererEvent, provider: AccountProviderId, state: AccountView): void => {
+      listener(provider, state)
+    }
     ipcRenderer.on(WELCOME_IPC.state, receive)
     return () => { ipcRenderer.removeListener(WELCOME_IPC.state, receive) }
   },

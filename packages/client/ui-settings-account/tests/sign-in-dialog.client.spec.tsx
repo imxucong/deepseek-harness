@@ -28,6 +28,15 @@ it.each([en, zh])('offers sign in or the existing API key editor', async (copy) 
   expect(props.useApiKey).toHaveBeenCalledOnce()
   expect(props.start).not.toHaveBeenCalled()
 })
+it('offers each mounted provider as its own entry', async () => {
+  const props = mount(null)
+  cleanup()
+  render(<SignInDialog {...props} account={{ ...props.account, providers: ['topask', 'deepseek'] }} />)
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.providerTopask })) })
+  expect(props.start).toHaveBeenCalledExactlyOnceWith('topask')
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.providerDeepseek })) })
+  expect(props.start).toHaveBeenLastCalledWith('deepseek')
+})
 it.each([en, zh])('requires a user action after timeout', async (copy) => {
   const props = mount({ id, phase: 'expired', errorCode: 'expired' }, copy)
   expect(props.start).not.toHaveBeenCalled()
@@ -172,11 +181,11 @@ it('keeps an outstanding start open until the request settles', async () => {
   const pending = Promise.withResolvers<undefined>()
   props.start.mockReturnValueOnce(pending.promise)
   render(<SignInDialog {...props} />)
-  fireEvent.click(screen.getByRole('button', { name: en.signIn }))
+  fireEvent.click(screen.getByRole('button', { name: en.providerDeepseek }))
   fireEvent.click(screen.getByRole('button', { name: en.close }))
   expect(props.close).not.toHaveBeenCalled()
   await act(async () => { pending.resolve(undefined); await pending.promise })
-  expect(screen.getByRole('button', { name: en.signIn }).hasAttribute('disabled')).toBe(false)
+  expect(screen.getByRole('button', { name: en.providerDeepseek }).hasAttribute('disabled')).toBe(false)
 })
 
 // Workspace login remains outside native welcome analytics even if a caller forwards a sender.
@@ -185,7 +194,7 @@ it('does not report workspace login views or login choices', async () => {
   const props = { ...dialogProps(null), track }
   const view = render(<SignInDialog {...props} />)
   view.rerender(<SignInDialog {...props} colorScheme="light" />)
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.signIn })) })
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.providerDeepseek })) })
   expect(props.start).toHaveBeenCalledOnce()
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.addApiKey })) })
   expect(props.useApiKey).toHaveBeenCalledOnce()

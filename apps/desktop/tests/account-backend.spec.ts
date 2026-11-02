@@ -30,11 +30,11 @@ it('uses account Remote commands without returning additional wire fields', asyn
     return Promise.resolve({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out', attempt: null, token: 'private' })
   }, () => Promise.resolve(''))
   const client = { version: '1.2.3', locale: 'en', timezoneOffsetSeconds: 28_800 }
-  expect(await backend.start(client)).toEqual({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out', attempt: null })
-  expect(await backend.signOut(client)).toMatchObject({ status: 'signed-out' })
+  expect(await backend.start(client, 'deepseek')).toEqual({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out', attempt: null })
+  expect(await backend.signOut(client, 'deepseek')).toMatchObject({ status: 'signed-out' })
   expect(requests).toEqual([
-    { namespace: 'account', method: 'startSignIn', args: { client, callbackOrigin: 'http://127.0.0.1:1234', loginSource: 'desktop' } },
-    { namespace: 'account', method: 'signOut', args: { client } },
+    { namespace: 'account', method: 'startSignIn', args: { provider: 'deepseek', client, callbackOrigin: 'http://127.0.0.1:1234', loginSource: 'desktop' } },
+    { namespace: 'account', method: 'signOut', args: { provider: 'deepseek', client } },
   ])
 })
 
@@ -42,6 +42,21 @@ it('does not replay an expiry reason from an account snapshot', () => {
   const state = { status: 'signed-out', attempt: null,
     links: { usageUrl: 'https://platform.deepseek.com/usage', topUpUrl: 'https://platform.deepseek.com/top_up' } }
   expect(accountView({ ...state, signOutReason: 'expired' })).toEqual(state)
+})
+
+it('lists providers and tags every call with its provider', async () => {
+  const requests: unknown[] = []
+  const snapshot = { links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out', attempt: null }
+  const backend = desktopAccountBackend('http://127.0.0.1:1234', (request) => {
+    requests.push(request)
+    return Promise.resolve(request.method === 'providers' ? ['topask', 'deepseek'] : snapshot)
+  }, () => Promise.resolve(''))
+  const client = { version: '1.2.3', locale: 'en', timezoneOffsetSeconds: 28_800 }
+  expect(await backend.providers()).toEqual(['topask', 'deepseek'])
+  await backend.start(client, 'topask')
+  expect(requests).toContainEqual({ namespace: 'account', method: 'startSignIn', args: {
+    provider: 'topask', client, callbackOrigin: 'http://127.0.0.1:1234', loginSource: 'desktop',
+  } })
 })
 
 it('receives live expiry separately from account snapshots', async () => {
@@ -61,7 +76,7 @@ it('receives live expiry separately from account snapshots', async () => {
   const received = Promise.withResolvers<undefined>()
   const backend = desktopAccountBackend(`http://127.0.0.1:${address.port}`, () => Promise.resolve(snapshot), () => Promise.resolve(''))
   const stop = backend.watch(
-    (value) => { expect(value).toEqual(snapshot); received.resolve(undefined) }, vi.fn(), expired, onAnalyticsEnabledChanged,
+    (provider, value) => { expect(provider).toBe('deepseek'); expect(value).toEqual(snapshot); received.resolve(undefined) }, vi.fn(), expired, onAnalyticsEnabledChanged,
   )
   onTestFinished(stop)
   await connected

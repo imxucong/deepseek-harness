@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Toast } from '@deepseek-ai/dsh-client-ui-primitives/src/Toast.tsx'
 import { StateDot } from '@deepseek-ai/dsh-client-ui-primitives/src/StateDot.tsx'
-import type { AccountView } from '@deepseek-ai/dsh-deepseek-account/types'
+import type { AccountProviderId, AccountView } from '@deepseek-ai/dsh-deepseek-account/types'
 import type { WelcomeApi } from '../welcome-api.ts'
 
 type Page = 'entry' | 'key' | 'account'
@@ -17,6 +17,8 @@ type Page = 'entry' | 'key' | 'account'
 export function Welcome({ api }: { api: WelcomeApi }) {
   const { messages: m } = api
   const [expiryNotice, setExpiryNotice] = useState(false)
+  const [providers, setProviders] = useState<AccountProviderId[]>(['deepseek'])
+  const chosen = useRef<AccountProviderId>('deepseek')
   const [page, setPage] = useState<Page>('entry')
   const pageRef = useRef<Page>('entry')
   const visiblePage = useRef<Page>('entry')
@@ -61,13 +63,23 @@ export function Welcome({ api }: { api: WelcomeApi }) {
       })
     }
     takeNotice()
-    const stop = api.onAccountState((state) => {
-      revision.current++
+    const stop = api.onAccountState((provider, state) => {
+      // The pending expiry notice belongs to whichever provider frame arrives first.
       takeNotice()
+      if (provider !== chosen.current) return
+      revision.current++
       showAccount(state)
     })
     return () => { mounted.current = false; stop() }
   }, [api, m.welcomeTitle])
+
+  useEffect(() => {
+    let active = true
+    void Promise.resolve().then(() => api.providers()).then((listed) => {
+      if (active && listed.length > 0) setProviders(listed)
+    }, () => undefined)
+    return () => { active = false }
+  }, [api, api.id])
 
   useEffect(() => {
     if (page === 'entry' && visiblePage.current !== 'entry') void api.analytics?.('auth_page_view', {})
@@ -125,14 +137,15 @@ export function Welcome({ api }: { api: WelcomeApi }) {
       if (mounted.current) setBusy(false)
     }
   }
-  async function start() {
+  async function start(provider: AccountProviderId) {
+    chosen.current = provider
     navigate('account')
     setStarting(true)
     setAttempt(null)
     attemptRef.current = null
     const current = ++revision.current
     try {
-      const state = await api.startSignIn()
+      const state = await api.startSignIn(provider)
       if (mounted.current && revision.current === current) showAccount(state)
     } catch {
       if (mounted.current && revision.current === current) setStarting(false)
@@ -143,7 +156,7 @@ export function Welcome({ api }: { api: WelcomeApi }) {
     setCancelling(true)
     const current = ++revision.current
     try {
-      const state = await api.cancelSignIn(attemptRef.current.id)
+      const state = await api.cancelSignIn(chosen.current, attemptRef.current.id)
       if (mounted.current && revision.current === current) showAccount(state)
     } catch {
       // The current attempt remains visible so cancellation can be retried.
@@ -156,7 +169,7 @@ export function Welcome({ api }: { api: WelcomeApi }) {
     if (current?.phase !== 'waiting-browser' || (copyState === 'busy' || copyState === 'copied')) return
     setCopyFeedback({ status: 'busy' })
     try {
-      await api.copySignInLink(current.id)
+      await api.copySignInLink(chosen.current, current.id)
       if (mounted.current && attemptRef.current === current) setCopyFeedback({ status: 'copied' })
     } catch {
       if (mounted.current && attemptRef.current === current) setCopyFeedback({ status: 'failed' })
@@ -202,14 +215,18 @@ export function Welcome({ api }: { api: WelcomeApi }) {
         <button id="auth-loading" className="primary" type="button" hidden={failed} disabled aria-label={m.welcomeAuthExchanging}>
           <StateDot state="ongoing" size={16} className="welcome-loading" />
         </button>
-        <button id="auth-retry" className="primary" type="button" hidden={!failed} onClick={() => { void api.analytics?.('auth_page_click', { button_name: 'sign_in' }); void start() }}>{m.welcomeAuthRetry}</button>
+        <button id="auth-retry" className="primary" type="button" hidden={!failed} onClick={() => { void api.analytics?.('auth_page_click', { button_name: 'sign_in' }); void start(chosen.current) }}>{m.welcomeAuthRetry}</button>
         <button id="auth-api-key" className="secondary" type="button" hidden={!failed} onClick={() => { void api.analytics?.('auth_page_click', { button_name: 'api-key' }); navigate('key') }}>{m.welcomeApiKey}</button>
         <button id="auth-cancel" className="secondary" type="button" hidden={failed}
           disabled={cancelling || phase === 'committing' || phase === 'succeeded' || (phase === 'initializing' && !attempt?.id)}
           onClick={() => { void cancel() }}>{m.welcomeAuthCancel}</button>
       </div>
       <div id="entry-actions" className="actions" hidden={page !== 'entry'}>
-        <button id="sign-in" className="primary" type="button" onClick={() => { void api.analytics?.('auth_page_click', { button_name: 'sign_in' }); void start() }}>{m.welcomeSignIn}</button>
+        {providers.map(provider => <button key={provider}
+          id={providers.length === 1 ? 'sign-in' : `sign-in-${provider}`} className="primary" type="button"
+          onClick={() => { void api.analytics?.('auth_page_click', { button_name: 'sign_in' }); void start(provider) }}>
+          {providers.length === 1 ? m.welcomeSignIn : provider === 'topask' ? m.welcomeSignInTopask : m.welcomeSignInDeepseek}
+        </button>)}
         <button ref={keyButton} id="api-key" className="secondary" type="button" onClick={() => { void api.analytics?.('auth_page_click', { button_name: 'api-key' }); navigate('key') }}>{m.welcomeApiKey}</button>
       </div>
       <div id="key-actions" className="actions" hidden={page !== 'key'}>

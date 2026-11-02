@@ -35,6 +35,7 @@ export const remoteDefaultResponses: RemoteTable = {
     // ui-permission-presets `PermissionCatalogDirectory` on its first read for a connection generation.
     'permissionPresets/catalog': ok({ options: [] }),
     // ui-settings-account refreshes details after a stored-grant snapshot.
+    'account/providers': ok(['deepseek']),
     'account/getProfile': ok(null),
     'account/getBalance': ok(null),
     // ui-settings-account bonus notice read and acknowledgement at signing in.

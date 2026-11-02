@@ -5,23 +5,25 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { Welcome } from '../src/client/WelcomePage.tsx'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resolveDesktopLocale } from '../src/locale.ts'
-import type { AccountView } from '@deepseek-ai/dsh-deepseek-account/types'
+import type { AccountProviderId, AccountView, SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
 import type { WelcomeSaveResult, WelcomeNotice } from '../src/welcome-api.ts'
 
 const html = readFileSync(join(import.meta.dirname, '../renderer/welcome.html'), 'utf8')
 afterEach(cleanup)
 
-function mount(language = 'zh-CN', takeNotice = vi.fn<() => Promise<WelcomeNotice | undefined>>().mockResolvedValue(undefined)) {
+function mount(language = 'zh-CN', takeNotice = vi.fn<() => Promise<WelcomeNotice | undefined>>().mockResolvedValue(undefined),
+  providers: AccountProviderId[] = ['deepseek']) {
   cleanup()
   const stopAccount = vi.fn()
   const api = {
     takeNotice,
     analytics: vi.fn(async (_event: string, _attributes: object) => {}),
     analyticsEnabled: async () => true,
-    onAccountState: vi.fn((_listener: (state: AccountView) => void) => stopAccount),
-    startSignIn: vi.fn(async (): Promise<AccountView> => ({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out', attempt: null })),
-    cancelSignIn: vi.fn(async (): Promise<AccountView> => ({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out', attempt: null })),
-    copySignInLink: vi.fn(async () => undefined),
+    providers: vi.fn(async () => providers),
+    onAccountState: vi.fn((_listener: (provider: AccountProviderId, state: AccountView) => void) => stopAccount),
+    startSignIn: vi.fn(async (_provider: AccountProviderId): Promise<AccountView> => ({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out', attempt: null })),
+    cancelSignIn: vi.fn(async (_provider: AccountProviderId, _id: SignInAttemptId): Promise<AccountView> => ({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out', attempt: null })),
+    copySignInLink: vi.fn(async (_provider: AccountProviderId, _id: SignInAttemptId) => undefined),
     ...resolveDesktopLocale(language),
     saveApiKey: vi.fn<(value: string) => Promise<WelcomeSaveResult>>().mockResolvedValue({ ok: true }),
     skip: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
@@ -48,6 +50,15 @@ function mount(language = 'zh-CN', takeNotice = vi.fn<() => Promise<WelcomeNotic
 }
 
 describe('desktop welcome presentation', () => {
+  it('offers each mounted provider and starts the chosen one', async () => {
+    const view = mount('zh-CN', undefined, ['topask', 'deepseek'])
+    await act(async () => {})
+    expect(view.button('#sign-in-topask').textContent).toBe(view.api.messages.welcomeSignInTopask)
+    expect(view.button('#sign-in-deepseek').textContent).toBe(view.api.messages.welcomeSignInDeepseek)
+    fireEvent.click(view.button('#sign-in-topask'))
+    expect(view.api.startSignIn).toHaveBeenCalledWith('topask')
+  })
+
   it.each(['zh-CN', 'en'])('renders the %s entry and API-key step', async (language) => {
     const view = mount(language)
     expect(view.document.documentElement.lang).toBe(language)
@@ -158,7 +169,7 @@ describe('desktop welcome presentation', () => {
 
 it.each(['zh-CN', 'en'])('renders %s timeout with manual retry and API-key alternative', async (language) => {
   const view = mount(language)
-  const receive = (state: AccountView) => { act(() => { view.api.onAccountState.mock.calls[0]![0](state) }) }
+  const receive = (state: AccountView) => { act(() => { view.api.onAccountState.mock.calls[0]![0]('deepseek', state) }) }
   receive({ status: 'signed-out', links: { usageUrl: '', topUpUrl: '' }, attempt: { id: 'expired' as NonNullable<AccountView['attempt']>['id'], phase: 'expired' } })
   expect(view.button('#auth-retry').hidden).toBe(false)
   expect(view.button('#auth-api-key').hidden).toBe(false)
@@ -171,7 +182,7 @@ it.each(['zh-CN', 'en'])('renders %s timeout with manual retry and API-key alter
 
 it.each(['zh-CN', 'en'])('renders %s browser fallback and copies only the active login link', async (language) => {
   const view = mount(language)
-  const receive = (state: AccountView) => { act(() => { view.api.onAccountState.mock.calls[0]![0](state) }) }
+  const receive = (state: AccountView) => { act(() => { view.api.onAccountState.mock.calls[0]![0]('deepseek', state) }) }
   const waiting: AccountView = { status: 'signed-out', links: { usageUrl: '', topUpUrl: '' },
     attempt: { id: 'waiting' as NonNullable<AccountView['attempt']>['id'], phase: 'waiting-browser', authorizeUrl: 'https://example.test/login' } }
   receive(waiting)
@@ -179,7 +190,7 @@ it.each(['zh-CN', 'en'])('renders %s browser fallback and copies only the active
     .toMatchFileSnapshot(`./expected/welcome/${language}-waiting.expected.txt`)
   fireEvent.click(view.button('#auth-copy'))
   await vi.waitFor(() => { expect(view.button('#auth-copy').textContent).toBe(view.api.messages.welcomeAuthCopied) })
-  expect(view.api.copySignInLink).toHaveBeenCalledWith('waiting')
+  expect(view.api.copySignInLink).toHaveBeenCalledWith('deepseek', 'waiting')
   await vi.waitFor(() => { expect(view.button('#auth-copy').disabled).toBe(false) }, { timeout: 3000 })
   view.api.copySignInLink.mockRejectedValueOnce(new Error('clipboard unavailable'))
   fireEvent.click(view.button('#auth-copy'))
@@ -200,7 +211,7 @@ it('keeps a newer account notification when the start response arrives late', as
   expect(view.button('#auth-cancel').disabled).toBe(true)
   const state: AccountView = { status: 'signed-out', links: { usageUrl: '', topUpUrl: '' },
     attempt: { id: 'attempt' as NonNullable<AccountView['attempt']>['id'], phase: 'expired' } }
-  act(() => { view.api.onAccountState.mock.calls[0]![0](state) })
+  act(() => { view.api.onAccountState.mock.calls[0]![0]('deepseek', state) })
   await act(async () => { started.resolve({ ...state, attempt: { ...state.attempt!, phase: 'waiting-browser' } }); await started.promise })
   expect(view.document.querySelector('#auth-status')!.textContent).toBe(view.api.messages.welcomeAuthExpired)
   expect(view.button('#auth-retry').hidden).toBe(false)
@@ -212,10 +223,10 @@ it('does not restore a copied-link status after leaving the waiting phase', asyn
   view.api.copySignInLink.mockReturnValueOnce(copied.promise)
   const waiting: AccountView = { status: 'signed-out', links: { usageUrl: '', topUpUrl: '' },
     attempt: { id: 'attempt' as NonNullable<AccountView['attempt']>['id'], phase: 'waiting-browser' } }
-  act(() => { view.api.onAccountState.mock.calls[0]![0](waiting) })
+  act(() => { view.api.onAccountState.mock.calls[0]![0]('deepseek', waiting) })
   fireEvent.click(view.button('#auth-copy'))
   expect(view.button('#auth-copy').disabled).toBe(true)
-  act(() => { view.api.onAccountState.mock.calls[0]![0]({ ...waiting, attempt: { ...waiting.attempt!, phase: 'exchanging' } }) })
+  act(() => { view.api.onAccountState.mock.calls[0]![0]('deepseek', { ...waiting, attempt: { ...waiting.attempt!, phase: 'exchanging' } }) })
   await act(async () => { copied.resolve(undefined); await copied.promise })
   expect(view.button('#auth-copy').hidden).toBe(true)
   expect(view.button('#auth-copy').textContent).toBe(view.api.messages.welcomeAuthCopyLink)
@@ -225,7 +236,7 @@ it('keeps the key draft while account notifications arrive and releases the subs
   const view = mount()
   fireEvent.click(view.button('#api-key'))
   view.enterKey('sk-draft')
-  act(() => { view.api.onAccountState.mock.calls[0]![0]({ status: 'signed-out', links: { usageUrl: '', topUpUrl: '' },
+  act(() => { view.api.onAccountState.mock.calls[0]![0]('deepseek', { status: 'signed-out', links: { usageUrl: '', topUpUrl: '' },
     attempt: { id: 'expired' as NonNullable<AccountView['attempt']>['id'], phase: 'expired' } }) })
   expect(view.document.querySelector<HTMLElement>('#key-form')!.hidden).toBe(false)
   expect(view.input.value).toBe('sk-draft')
@@ -240,7 +251,7 @@ it.each(['copied', 'failed'] as const)('restores the copy action after %s feedba
     if (result === 'failed') view.api.copySignInLink.mockRejectedValue(new Error('clipboard unavailable'))
     const waiting: AccountView = { status: 'signed-out', links: { usageUrl: '', topUpUrl: '' },
       attempt: { id: 'waiting' as NonNullable<AccountView['attempt']>['id'], phase: 'waiting-browser' } }
-    act(() => { view.api.onAccountState.mock.calls[0]![0](waiting) })
+    act(() => { view.api.onAccountState.mock.calls[0]![0]('deepseek', waiting) })
     const feedback = result === 'copied' ? view.api.messages.welcomeAuthCopied : view.api.messages.welcomeAuthCopyFailed
     const copy = async () => { await act(async () => { fireEvent.click(view.button('#auth-copy')) }) }
     await copy()
@@ -270,7 +281,7 @@ it.each(['zh-CN', 'en'])('keeps the expiry notice visible after returning to Wel
     const takeNotice = vi.fn<() => Promise<WelcomeNotice | undefined>>().mockResolvedValue(undefined).mockResolvedValueOnce('session-expired')
     const view = mount(language, takeNotice)
     await act(async () => {})
-    const publish = view.api.onAccountState.mock.calls[0]![0]
+    const publish = (state: AccountView) => { view.api.onAccountState.mock.calls[0]![0]('deepseek', state) }
     const expired: AccountView = { status: 'signed-out', attempt: null,
       links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' } }
     await act(async () => { publish(expired) })
@@ -292,7 +303,7 @@ it.each(['zh-CN', 'en'])('keeps the expiry notice visible after returning to Wel
 it('does not infer a notification from a retained expired account snapshot', async () => {
   const view = mount()
   await act(async () => {
-    view.api.onAccountState.mock.calls[0]![0]({ status: 'signed-out', attempt: null,
+    view.api.onAccountState.mock.calls[0]![0]('deepseek', { status: 'signed-out', attempt: null,
       links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' } })
   })
   expect(screen.queryByRole('alert')).toBeNull()
@@ -318,7 +329,7 @@ it('ignores a notification received after its renderer unmounts', async () => {
 
 it.each(['zh-CN', 'en'])('returns from completed sign-in to the initial page after sign-out: %s', async (language) => {
   const view = mount(language)
-  const publish = view.api.onAccountState.mock.calls[0]![0]
+  const publish = (state: AccountView) => { view.api.onAccountState.mock.calls[0]![0]('deepseek', state) }
   const links = { usageUrl: 'https://example.test/usage', topUpUrl: 'https://example.test/top_up' }
   act(() => { publish({ status: 'credential-stored', links,
     attempt: { id: 'completed' as NonNullable<AccountView['attempt']>['id'], phase: 'succeeded' } }) })
