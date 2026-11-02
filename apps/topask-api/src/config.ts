@@ -10,8 +10,10 @@ export interface DevUser {
 
 /** Account API configuration; every deployment-varying value is validated here. */
 export interface Config {
-  /** Public origin browsers use to reach this service, without a trailing slash. */
-  readonly origin: string
+  /** Public platform origin browsers and the account provider use, without a trailing slash. */
+  readonly platformOrigin: string
+  /** Shared secret the platform app presents on internal endpoints. */
+  readonly internalToken: string
   /** Listen address. */
   readonly host: string
   /** Listen port; zero requests an OS-assigned port. */
@@ -51,7 +53,7 @@ export function publicOrigin(value: string): string {
   const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
   if (url.username !== '' || url.password !== '' || url.pathname !== '/' || url.search !== '' || url.hash !== ''
     || !(url.protocol === 'https:' || (loopback && url.protocol === 'http:'))) {
-    throw new Error('topask-api: TOPASK_API_ORIGIN must be an HTTPS origin, or loopback HTTP for development')
+    throw new Error('topask-api: TOPASK_PLATFORM_ORIGIN must be an HTTPS origin, or loopback HTTP for development')
   }
   return url.origin
 }
@@ -68,7 +70,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     throw new Error('topask-api: TOPASK_API_IDENTITY must be "dev" until another identity source ships')
   }
   return {
-    origin: publicOrigin(required(env, 'TOPASK_API_ORIGIN')),
+    platformOrigin: publicOrigin(required(env, 'TOPASK_PLATFORM_ORIGIN')),
+    internalToken: required(env, 'TOPASK_INTERNAL_TOKEN'),
     host: env.TOPASK_API_HOST?.trim() || '127.0.0.1',
     port: integer(env, 'TOPASK_API_PORT', 8790, 0, 65_535),
     dataDir: env.TOPASK_API_DATA_DIR?.trim() || '.topask-api',

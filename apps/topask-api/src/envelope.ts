@@ -45,31 +45,3 @@ export function sendJson(res: ServerResponse, status: number, value: unknown): v
   if (body.byteLength > MAX_RESPONSE_BYTES) throw new RangeError('topask-api: response exceeds the client limit')
   write(res, status, body, 'application/json; charset=utf-8')
 }
-
-/**
- * Content policy for browser pages. The approval form posts to this service and
- * then redirects to the Host's loopback callback on a different port, which
- * `form-action` also checks, so loopback hosts are allowed on any port.
- */
-const PAGE_CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'; "
-  + "form-action 'self' http://127.0.0.1:* http://localhost:* http://[::1]:*"
-
-/**
- * Write one HTML page without caching it.
- * @param res - response owning the socket.
- * @param status - HTTP status.
- * @param html - complete document.
- */
-export function sendHtml(res: ServerResponse, status: number, html: string): void {
-  const body = Buffer.from(html)
-  if (body.byteLength > MAX_RESPONSE_BYTES) throw new RangeError('topask-api: response exceeds the client limit')
-  write(res, status, body, 'text/html; charset=utf-8', {
-    'content-security-policy': PAGE_CONTENT_SECURITY_POLICY,
-  })
-}
-
-/** Escape one value for HTML text and attribute positions. @param value - untrusted text. @returns escaped text. */
-export function escapeHtml(value: string): string {
-  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;').replaceAll("'", '&#39;')
-}

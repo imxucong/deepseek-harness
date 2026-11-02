@@ -3,8 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { z } from 'zod'
 import { equalText, hashSecret, pkceChallenge, randomHandle } from './auth.ts'
 import type { Config } from './config.ts'
-import { failure, sendHtml, sendJson, success } from './envelope.ts'
-import { authorizedPage, authorizePage, localeFrom, noticePage } from './pages.ts'
+import { failure, sendJson, success } from './envelope.ts'
 import type { GrantRecord, Store, UserRecord } from './store.ts'
 
 /** Largest request body any account endpoint accepts. */
@@ -52,6 +51,11 @@ const cancelRequest = z.object({
 })
 
 const bonusRequest = z.object({ order_id: z.string().min(1).max(256) })
+
+const decisionRequest = z.object({
+  action: z.enum(['approve', 'deny']),
+  state: z.string().min(1).max(512),
+})
 
 function readBody(req: IncomingMessage): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -125,45 +129,67 @@ function methodNotAllowed(res: ServerResponse, allow: string): void {
   res.end('method not allowed')
 }
 
-function authorizeGet(res: ServerResponse, url: URL, options: ApiOptions, now: number): void {
-  const authorizeId = url.searchParams.get('authorize_id')
-  if (authorizeId === null) { sendHtml(res, 400, noticePage('missing', 'zh')); return }
-  const attempt = options.store.findAttempt(authorizeId)
-  if (attempt === undefined) { sendHtml(res, 404, noticePage('not-found', 'zh')); return }
-  const locale = localeFrom(attempt.locale)
-  if (attempt.expiresAt <= now) { sendHtml(res, 410, noticePage('expired', locale)); return }
-  const user = options.store.findUser(attempt.userId)
-  if (user === undefined) { sendHtml(res, 500, noticePage('unavailable', locale)); return }
-  sendHtml(res, 200, authorizePage(attempt, user, locale))
+/**
+ * Whether the request carries the shared platform-to-API internal token.
+ * @param req - inbound request.
+ * @param options - server dependencies.
+ * @returns true when the token matches.
+ */
+function internalAuthorized(req: IncomingMessage, options: ApiOptions): boolean {
+  const value = req.headers['x-topask-internal-token']
+  const token = Array.isArray(value) ? value[0] : value
+  return token !== undefined && equalText(token, options.config.internalToken)
 }
 
-async function authorizePost(req: IncomingMessage, res: ServerResponse, options: ApiOptions, now: number): Promise<void> {
-  const form = new URLSearchParams((await readBody(req)).toString('utf8'))
-  const authorizeId = form.get('authorize_id')
-  const state = form.get('state')
-  const action = form.get('action')
-  if (authorizeId === null || state === null || (action !== 'approve' && action !== 'deny')) {
-    sendHtml(res, 400, noticePage('invalid-confirmation', 'zh'))
-    return
-  }
+/**
+ * Read one sign-in attempt for the platform app.
+ * @param res - response to write.
+ * @param authorizeId - attempt identity.
+ * @param options - server dependencies.
+ */
+function internalAttempt(res: ServerResponse, authorizeId: string, options: ApiOptions): void {
   const attempt = options.store.findAttempt(authorizeId)
-  if (attempt === undefined) { sendHtml(res, 410, noticePage('not-found', 'zh')); return }
-  const locale = localeFrom(attempt.locale)
-  if (attempt.expiresAt <= now) { sendHtml(res, 410, noticePage('expired', locale)); return }
-  if (!equalText(attempt.state, state)) { sendHtml(res, 400, noticePage('state-mismatch', locale)); return }
-  if (action === 'deny') {
+  if (attempt === undefined) { sendJson(res, 404, { error: 'not-found' }); return }
+  const user = options.store.findUser(attempt.userId)
+  if (user === undefined) { sendJson(res, 500, { error: 'unavailable' }); return }
+  sendJson(res, 200, {
+    authorizeId: attempt.authorizeId,
+    state: attempt.state,
+    locale: attempt.locale,
+    loginSource: attempt.loginSource,
+    expiresAt: attempt.expiresAt,
+    user: { name: user.name, email: user.email },
+  })
+}
+
+/**
+ * Approve or deny one sign-in attempt for the platform app.
+ * @param req - inbound request carrying the decision.
+ * @param res - response to write.
+ * @param options - server dependencies.
+ * @param now - epoch milliseconds.
+ * @param authorizeId - attempt identity.
+ */
+async function internalDecision(req: IncomingMessage, res: ServerResponse, options: ApiOptions,
+  now: number, authorizeId: string): Promise<void> {
+  const request = parseJson(decisionRequest, await readBody(req))
+  const attempt = options.store.findAttempt(authorizeId)
+  if (attempt === undefined) { sendJson(res, 404, { error: 'not-found' }); return }
+  if (attempt.expiresAt <= now) { sendJson(res, 410, { error: 'expired' }); return }
+  if (!equalText(attempt.state, request.state)) { sendJson(res, 400, { error: 'state-mismatch' }); return }
+  if (request.action === 'deny') {
     options.store.cancelAttempt(authorizeId)
-    sendHtml(res, 200, noticePage('cancelled', locale))
+    sendJson(res, 200, { redirect: null })
     return
   }
   const code = randomHandle(32)
   if (!options.store.approveAttempt(authorizeId, hashSecret(code), now)) {
-    sendHtml(res, 410, noticePage('expired', locale))
+    sendJson(res, 410, { error: 'expired' })
     return
   }
-  const location = `${attempt.redirectUri}?code=${encodeURIComponent(code)}&state=${encodeURIComponent(attempt.state)}`
-  res.writeHead(303, { location, 'cache-control': 'no-store', 'content-length': '0' })
-  res.end()
+  sendJson(res, 200, {
+    redirect: `${attempt.redirectUri}?code=${encodeURIComponent(code)}&state=${encodeURIComponent(attempt.state)}`,
+  })
 }
 
 async function authInit(req: IncomingMessage, res: ServerResponse, options: ApiOptions, now: number): Promise<void> {
@@ -183,7 +209,7 @@ async function authInit(req: IncomingMessage, res: ServerResponse, options: ApiO
     expiresAt: now + options.config.attemptTtlMs,
   })
   sendJson(res, 200, success({
-    authorize_url: `${options.config.origin}/dsh/authorize?authorize_id=${encodeURIComponent(authorizeId)}`,
+    authorize_url: `${options.config.platformOrigin}/dsh/authorize?authorize_id=${encodeURIComponent(authorizeId)}`,
     authorize_id: authorizeId,
     expires_in: Math.floor(options.config.attemptTtlMs / 1000),
   }))
@@ -218,7 +244,7 @@ async function authExchange(req: IncomingMessage, res: ServerResponse, options: 
   const localeTag = attempt.locale === '' ? 'zh_CN' : attempt.locale
   sendJson(res, 200, success({
     token,
-    authorized_url: `${options.config.origin}/dsh/authorized?locale=${encodeURIComponent(localeTag)}`,
+    authorized_url: `${options.config.platformOrigin}/dsh/authorized?locale=${encodeURIComponent(localeTag)}`,
     user: userPayload(user),
   }))
 }
@@ -264,7 +290,21 @@ async function acknowledgeBonus(req: IncomingMessage, res: ServerResponse, optio
 
 async function handle(req: IncomingMessage, res: ServerResponse, options: ApiOptions, now: () => number): Promise<void> {
   const clock = now()
-  const url = new URL(req.url ?? '/', options.config.origin)
+  const url = new URL(req.url ?? '/', options.config.platformOrigin)
+  const internal = /^\/internal\/attempts\/([^/]+)(\/decision)?$/u.exec(url.pathname)
+  if (internal !== null) {
+    if (!internalAuthorized(req, options)) { sendJson(res, 401, { error: 'unauthorized' }); return }
+    let authorizeId: string
+    try { authorizeId = decodeURIComponent(internal[1] as string) } catch { sendJson(res, 400, { error: 'invalid-id' }); return }
+    if (internal[2] === undefined) {
+      if (req.method !== 'GET') { methodNotAllowed(res, 'GET'); return }
+      internalAttempt(res, authorizeId, options)
+      return
+    }
+    if (req.method !== 'POST') { methodNotAllowed(res, 'POST'); return }
+    await internalDecision(req, res, options, clock, authorizeId)
+    return
+  }
   switch (url.pathname) {
     case '/healthz':
       if (req.method !== 'GET') { methodNotAllowed(res, 'GET'); return }
@@ -301,26 +341,6 @@ async function handle(req: IncomingMessage, res: ServerResponse, options: ApiOpt
     case '/api/v0/users/ack_bonus_notified':
       if (req.method !== 'POST') { methodNotAllowed(res, 'POST'); return }
       await acknowledgeBonus(req, res, options, clock)
-      return
-    case '/dsh/authorize':
-      if (req.method === 'GET') { authorizeGet(res, url, options, clock); return }
-      if (req.method === 'POST') { await authorizePost(req, res, options, clock); return }
-      methodNotAllowed(res, 'GET, POST')
-      return
-    case '/dsh/authorized':
-      if (req.method !== 'GET') { methodNotAllowed(res, 'GET'); return }
-      sendHtml(res, 200, authorizedPage(
-        localeFrom(url.searchParams.get('locale') ?? undefined),
-        url.searchParams.get('login_source'),
-      ))
-      return
-    case '/usage':
-      if (req.method !== 'GET') { methodNotAllowed(res, 'GET'); return }
-      sendHtml(res, 200, noticePage('usage', localeFrom(url.searchParams.get('locale') ?? undefined)))
-      return
-    case '/top_up':
-      if (req.method !== 'GET') { methodNotAllowed(res, 'GET'); return }
-      sendHtml(res, 200, noticePage('top-up', localeFrom(url.searchParams.get('locale') ?? undefined)))
       return
     default:
       res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' })

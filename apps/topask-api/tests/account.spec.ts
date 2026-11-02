@@ -7,8 +7,12 @@ import type { ProtocolEnvelope } from '../src/envelope.ts'
 import { createApiServer } from '../src/server.ts'
 import { MemoryStore } from '../src/store.ts'
 
+const platformOrigin = 'http://127.0.0.1:8791'
+const internalToken = 'test-internal-token'
+
 const config: Config = {
-  origin: 'http://127.0.0.1:8790',
+  platformOrigin,
+  internalToken,
   host: '127.0.0.1',
   port: 0,
   dataDir: '',
@@ -50,7 +54,6 @@ async function json(response: Response): Promise<ProtocolEnvelope> {
 
 async function initialize(base: string, state = 'state-1', redirect = redirectUri): Promise<{
   authorizeId: string
-  authorizePath: string
   codeVerifier: string
   state: string
   redirect: string
@@ -72,9 +75,9 @@ async function initialize(base: string, state = 'state-1', redirect = redirectUr
   if (envelope.data.biz_code !== 0) throw new Error(`auth_init failed: ${String(envelope.data.biz_code)}`)
   const biz = envelope.data.biz_data as { authorize_url: string; authorize_id: string; expires_in: number }
   const authorizeUrl = new URL(biz.authorize_url)
+  expect(authorizeUrl.origin).toBe(platformOrigin)
   return {
     authorizeId: biz.authorize_id,
-    authorizePath: `${authorizeUrl.pathname}${authorizeUrl.search}`,
     codeVerifier,
     state,
     redirect,
@@ -82,16 +85,15 @@ async function initialize(base: string, state = 'state-1', redirect = redirectUr
 }
 
 async function approve(base: string, attempt: { authorizeId: string; state: string }): Promise<{ code: string; state: string }> {
-  const response = await fetch(`${base}/dsh/authorize`, {
+  const response = await fetch(`${base}/internal/attempts/${encodeURIComponent(attempt.authorizeId)}/decision`, {
     method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ authorize_id: attempt.authorizeId, state: attempt.state, action: 'approve' }),
-    redirect: 'manual',
+    headers: { 'content-type': 'application/json', 'x-topask-internal-token': internalToken },
+    body: JSON.stringify({ action: 'approve', state: attempt.state }),
   })
-  expect(response.status).toBe(303)
-  const location = response.headers.get('location')
-  if (location === null) throw new Error('approval has no location')
-  const target = new URL(location)
+  expect(response.status).toBe(200)
+  const body = await response.json() as { redirect: string | null }
+  if (body.redirect === null) throw new Error('approval returned no redirect')
+  const target = new URL(body.redirect)
   return { code: target.searchParams.get('code') ?? '', state: target.searchParams.get('state') ?? '' }
 }
 
@@ -124,14 +126,6 @@ describe('account protocol', () => {
     const base = await start()
     const attempt = await initialize(base)
 
-    const page = await fetch(`${base}${attempt.authorizePath}`)
-    expect(page.status).toBe(200)
-    // The approval redirects to the Host callback on another loopback port.
-    expect(page.headers.get('content-security-policy')).toContain(
-      "form-action 'self' http://127.0.0.1:* http://localhost:* http://[::1]:*",
-    )
-    expect(await page.text()).toContain('TopAsk Dev')
-
     const approved = await approve(base, attempt)
     expect(approved.state).toBe('state-1')
 
@@ -141,7 +135,7 @@ describe('account protocol', () => {
     expect(exchanged.data.biz_code).toBe(0)
     const grant = exchanged.data.biz_data as { token: string; authorized_url: string }
     expect(grant.token).toMatch(/^[\x21-\x7e]+$/)
-    expect(grant.authorized_url).toBe('http://127.0.0.1:8790/dsh/authorized?locale=zh_CN')
+    expect(grant.authorized_url).toBe(`${platformOrigin}/dsh/authorized?locale=zh_CN`)
 
     const profile = await current(base, grant.token)
     expect(profile.status).toBe(200)
@@ -160,31 +154,50 @@ describe('account protocol', () => {
     expect((await current(base, grant.token)).status).toBe(401)
   })
 
-  it('renders the branded consent and completion pages', async () => {
+  it('serves attempts to the platform app only with the internal token', async () => {
     const base = await start()
     const attempt = await initialize(base)
 
-    const consent = await fetch(`${base}${attempt.authorizePath}`)
-    const consentHtml = await consent.text()
-    expect(consentHtml).toContain('允许登录 TopAsk')
-    expect(consentHtml).toContain('TopAsk Dev')
-    expect(consentHtml).toContain('action="/dsh/authorize"')
-    expect(consentHtml).toContain('class="brand-pane"')
+    expect((await fetch(`${base}/internal/attempts/${attempt.authorizeId}`)).status).toBe(401)
 
-    const desktop = await fetch(`${base}/dsh/authorized?locale=zh_CN&login_source=desktop`)
-    const desktopHtml = await desktop.text()
-    expect(desktopHtml).toContain('登录成功')
-    expect(desktopHtml).toContain('href="dsh://open"')
-    expect(desktopHtml).toContain('共探智能上限')
+    const response = await fetch(`${base}/internal/attempts/${attempt.authorizeId}`, {
+      headers: { 'x-topask-internal-token': internalToken },
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      authorizeId: attempt.authorizeId,
+      state: 'state-1',
+      locale: 'zh_CN',
+      user: { name: 'TopAsk Dev', email: 'dev@topask.local' },
+    })
+  })
 
-    const web = await fetch(`${base}/dsh/authorized?locale=en_US&login_source=web`)
-    const webHtml = await web.text()
-    expect(webHtml).toContain('Signed in')
-    expect(webHtml).not.toContain('dsh://open')
+  it('denies one attempt without issuing a redirect', async () => {
+    const base = await start()
+    const attempt = await initialize(base)
 
-    const missing = await fetch(`${base}/dsh/authorize?authorize_id=missing`)
-    expect(missing.status).toBe(404)
-    expect(await missing.text()).toContain('登录请求不存在')
+    const response = await fetch(`${base}/internal/attempts/${attempt.authorizeId}/decision`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-topask-internal-token': internalToken },
+      body: JSON.stringify({ action: 'deny', state: attempt.state }),
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ redirect: null })
+    expect((await fetch(`${base}/internal/attempts/${attempt.authorizeId}`, {
+      headers: { 'x-topask-internal-token': internalToken },
+    })).status).toBe(404)
+  })
+
+  it('refuses an internal decision with the wrong state', async () => {
+    const base = await start()
+    const attempt = await initialize(base)
+
+    const response = await fetch(`${base}/internal/attempts/${attempt.authorizeId}/decision`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-topask-internal-token': internalToken },
+      body: JSON.stringify({ action: 'approve', state: 'wrong-state' }),
+    })
+    expect(response.status).toBe(400)
   })
 
   it('refuses a wrong PKCE verifier without consuming the code', async () => {
@@ -240,11 +253,14 @@ describe('account protocol', () => {
     const attempt = await initialize(base)
     clock += 600_001
 
-    expect((await fetch(`${base}${attempt.authorizePath}`)).status).toBe(410)
-    const approval = await fetch(`${base}/dsh/authorize`, {
+    const fetched = await fetch(`${base}/internal/attempts/${attempt.authorizeId}`, {
+      headers: { 'x-topask-internal-token': internalToken },
+    })
+    expect(fetched.status).toBe(200)
+    const approval = await fetch(`${base}/internal/attempts/${attempt.authorizeId}/decision`, {
       method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ authorize_id: attempt.authorizeId, state: attempt.state, action: 'approve' }),
+      headers: { 'content-type': 'application/json', 'x-topask-internal-token': internalToken },
+      body: JSON.stringify({ action: 'approve', state: attempt.state }),
     })
     expect(approval.status).toBe(410)
   })
