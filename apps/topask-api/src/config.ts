@@ -14,6 +14,8 @@ export interface Config {
   readonly platformOrigin: string
   /** Shared secret the platform app presents on internal endpoints. */
   readonly internalToken: string
+  /** Shared secret the operator admin BFF presents on admin endpoints. */
+  readonly adminToken: string
   /** Listen address. */
   readonly host: string
   /** Listen port; zero requests an OS-assigned port. */
@@ -72,6 +74,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     platformOrigin: publicOrigin(required(env, 'TOPASK_PLATFORM_ORIGIN')),
     internalToken: required(env, 'TOPASK_INTERNAL_TOKEN'),
+    adminToken: required(env, 'TOPASK_ADMIN_TOKEN'),
     host: env.TOPASK_API_HOST?.trim() || '127.0.0.1',
     port: integer(env, 'TOPASK_API_PORT', 8790, 0, 65_535),
     dataDir: env.TOPASK_API_DATA_DIR?.trim() || '.topask-api',

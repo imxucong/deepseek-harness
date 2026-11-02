@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { equalText, hashSecret, pkceChallenge, randomHandle } from './auth.ts'
 import type { Config } from './config.ts'
 import { failure, sendJson, success } from './envelope.ts'
-import type { GrantRecord, Store, UserRecord } from './store.ts'
+import type { GrantRecord, PageQuery, Store, UserRecord } from './store.ts'
 
 /** Largest request body any account endpoint accepts. */
 const MAX_REQUEST_BYTES = 65_536
@@ -12,6 +12,8 @@ const MAX_REQUEST_BYTES = 65_536
 const BIZ_INVALID_REQUEST = 1
 /** Business outcome for an unknown, expired, or replayed authorization code. */
 const BIZ_INVALID_GRANT = 2
+/** Business outcome for an account the operator disabled. */
+const BIZ_ACCOUNT_DISABLED = 3
 
 /** Dependencies one server instance reads for its lifetime. */
 export interface ApiOptions {
@@ -55,6 +57,19 @@ const bonusRequest = z.object({ order_id: z.string().min(1).max(256) })
 const decisionRequest = z.object({
   action: z.enum(['approve', 'deny']),
   state: z.string().min(1).max(512),
+})
+
+const disabledRequest = z.object({ disabled: z.boolean() })
+
+const money = z.string().regex(/^\d{1,9}(?:\.\d{1,2})?$/u)
+
+const balanceRequest = z.object({ balance: money })
+
+const adminBonusRequest = z.object({
+  amount: money,
+  title: z.string().trim().min(1).max(200),
+  message: z.string().trim().min(1).max(1000),
+  expiresInDays: z.number().int().min(1).max(3650).optional(),
 })
 
 function readBody(req: IncomingMessage): Promise<Buffer> {
@@ -108,7 +123,50 @@ function tokenOf(req: IncomingMessage): string | undefined {
 function grantOf(req: IncomingMessage, options: ApiOptions, now: number): GrantRecord | undefined {
   const token = tokenOf(req)
   if (token === undefined || !/^[\x21-\x7e]+$/.test(token)) return undefined
-  return options.store.findGrant(hashSecret(token), now)
+  const grant = options.store.findGrant(hashSecret(token), now)
+  if (grant === undefined) return undefined
+  return options.store.findUser(grant.userId)?.disabled === true ? undefined : grant
+}
+
+function headerOf(req: IncomingMessage, name: string): string | undefined {
+  const value = req.headers[name]
+  return Array.isArray(value) ? value[0] : value
+}
+
+function adminAuthorized(req: IncomingMessage, options: ApiOptions): boolean {
+  const token = headerOf(req, 'x-topask-admin-token')
+  return token !== undefined && equalText(token, options.config.adminToken)
+}
+
+function operatorOf(req: IncomingMessage): { subject: string; email: string } | undefined {
+  const subject = headerOf(req, 'x-topask-operator-subject')?.trim()
+  const email = headerOf(req, 'x-topask-operator-email')?.trim()
+  if (subject === undefined || subject === '' || email === undefined || email === '' || email.length > 320) return undefined
+  return { subject, email }
+}
+
+function pageOf(url: URL): PageQuery {
+  const rawQuery = url.searchParams.get('q')?.trim() ?? ''
+  const rawLimit = Number(url.searchParams.get('limit') ?? '50')
+  const rawOffset = Number(url.searchParams.get('offset') ?? '0')
+  const limit = Number.isInteger(rawLimit) ? Math.min(200, Math.max(1, rawLimit)) : 50
+  const offset = Number.isInteger(rawOffset) ? Math.min(1_000_000, Math.max(0, rawOffset)) : 0
+  return { query: rawQuery.slice(0, 200), limit, offset }
+}
+
+function formatCents(cents: number): string {
+  return (cents / 100).toFixed(2)
+}
+
+function parseCents(value: string): number {
+  return Math.round(Number(value) * 100)
+}
+
+function audit(options: ApiOptions, operator: { subject: string; email: string }, action: string,
+  target: string, details: string, now: number): void {
+  options.store.appendAudit({
+    actorSubject: operator.subject, actorEmail: operator.email, action, target, details, createdAt: now,
+  })
 }
 
 function userPayload(user: UserRecord): unknown {
@@ -152,6 +210,7 @@ function internalAttempt(res: ServerResponse, authorizeId: string, options: ApiO
   if (attempt === undefined) { sendJson(res, 404, { error: 'not-found' }); return }
   const user = options.store.findUser(attempt.userId)
   if (user === undefined) { sendJson(res, 500, { error: 'unavailable' }); return }
+  if (user.disabled === true) { sendJson(res, 403, { error: 'disabled' }); return }
   sendJson(res, 200, {
     authorizeId: attempt.authorizeId,
     state: attempt.state,
@@ -175,6 +234,9 @@ async function internalDecision(req: IncomingMessage, res: ServerResponse, optio
   const request = parseJson(decisionRequest, await readBody(req))
   const attempt = options.store.findAttempt(authorizeId)
   if (attempt === undefined) { sendJson(res, 404, { error: 'not-found' }); return }
+  const user = options.store.findUser(attempt.userId)
+  if (user === undefined) { sendJson(res, 500, { error: 'unavailable' }); return }
+  if (user.disabled === true) { sendJson(res, 403, { error: 'disabled' }); return }
   if (attempt.expiresAt <= now) { sendJson(res, 410, { error: 'expired' }); return }
   if (!equalText(attempt.state, request.state)) { sendJson(res, 400, { error: 'state-mismatch' }); return }
   if (request.action === 'deny') {
@@ -197,6 +259,10 @@ async function authInit(req: IncomingMessage, res: ServerResponse, options: ApiO
   const redirect = loopbackRedirect(request.redirect_uri)
   const user = options.config.identity.user
   options.store.upsertUser(user)
+  if (options.store.findUser(user.id)?.disabled === true) {
+    sendJson(res, 200, failure(BIZ_ACCOUNT_DISABLED))
+    return
+  }
   const authorizeId = randomHandle(16)
   options.store.createAttempt({
     authorizeId,
@@ -228,18 +294,21 @@ async function authExchange(req: IncomingMessage, res: ServerResponse, options: 
   if (!options.store.consumeAttempt(attempt.authorizeId, now)) { sendJson(res, 200, failure(BIZ_INVALID_GRANT)); return }
   const user = options.store.findUser(attempt.userId)
   if (user === undefined) { sendJson(res, 200, failure(BIZ_INVALID_REQUEST)); return }
+  if (user.disabled === true) { sendJson(res, 200, failure(BIZ_ACCOUNT_DISABLED)); return }
   const token = randomHandle(32)
   const deviceId = request.device_id ?? randomHandle(16)
   options.store.putDevice({
     id: deviceId,
     model: request.device_model ?? '',
     osVersion: request.os_version ?? '',
+    createdAt: now,
   }, now)
   options.store.createGrant({
     tokenHash: hashSecret(token),
     userId: user.id,
     deviceId,
     expiresAt: now + options.config.tokenTtlMs,
+    createdAt: now,
   })
   const localeTag = attempt.locale === '' ? 'zh_CN' : attempt.locale
   sendJson(res, 200, success({
@@ -270,27 +339,168 @@ function currentUser(req: IncomingMessage, res: ServerResponse, options: ApiOpti
 }
 
 function walletSummary(req: IncomingMessage, res: ServerResponse, options: ApiOptions, now: number): void {
-  if (grantOf(req, options, now) === undefined) { unauthorized(res); return }
+  const grant = grantOf(req, options, now)
+  if (grant === undefined) { unauthorized(res); return }
+  const wallet = options.store.getWallet(grant.userId)
   sendJson(res, 200, success({
-    normal_wallets: [{ currency: 'CNY', balance: '0.00' }],
-    bonus_wallets: [],
+    normal_wallets: [{ currency: 'CNY', balance: formatCents(wallet.balanceCents) }],
+    bonus_wallets: [{ currency: 'CNY', balance: formatCents(wallet.bonusCents) }],
   }))
 }
 
 function bonuses(req: IncomingMessage, res: ServerResponse, options: ApiOptions, now: number): void {
-  if (grantOf(req, options, now) === undefined) { unauthorized(res); return }
-  sendJson(res, 200, success([]))
+  const grant = grantOf(req, options, now)
+  if (grant === undefined) { unauthorized(res); return }
+  const entries = options.store.listBonuses(grant.userId)
+    .filter(entry => !entry.notified && entry.expiresAt > now)
+    .map(entry => ({
+      order_id: entry.orderId,
+      title: entry.title,
+      amount: formatCents(entry.amountCents),
+      currency: entry.currency,
+      granted_at: new Date(entry.createdAt).toISOString(),
+      expires_at: new Date(entry.expiresAt).toISOString(),
+      msg: entry.message,
+    }))
+  sendJson(res, 200, success(entries))
 }
 
 async function acknowledgeBonus(req: IncomingMessage, res: ServerResponse, options: ApiOptions, now: number): Promise<void> {
-  parseJson(bonusRequest, await readBody(req))
-  if (grantOf(req, options, now) === undefined) { unauthorized(res); return }
+  const request = parseJson(bonusRequest, await readBody(req))
+  const grant = grantOf(req, options, now)
+  if (grant === undefined) { unauthorized(res); return }
+  options.store.ackBonus(request.order_id, grant.userId)
   sendJson(res, 200, success({}))
+}
+
+async function adminRoute(req: IncomingMessage, res: ServerResponse, options: ApiOptions,
+  now: number, url: URL): Promise<void> {
+  const operator = operatorOf(req)
+  if (operator === undefined) { sendJson(res, 401, { error: 'operator-required' }); return }
+  const path = url.pathname.slice('/admin-api/'.length)
+  if (path === 'overview') {
+    if (req.method !== 'GET') { methodNotAllowed(res, 'GET'); return }
+    sendJson(res, 200, options.store.overview())
+    return
+  }
+  if (path === 'users') {
+    if (req.method !== 'GET') { methodNotAllowed(res, 'GET'); return }
+    sendJson(res, 200, options.store.listUsers(pageOf(url)))
+    return
+  }
+  const userMatch = /^users\/([^/]+)$/u.exec(path)
+  if (userMatch !== null) {
+    if (req.method !== 'GET') { methodNotAllowed(res, 'GET'); return }
+    let id: string
+    try { id = decodeURIComponent(userMatch[1] as string) } catch { sendJson(res, 400, { error: 'invalid-id' }); return }
+    const detail = options.store.findUser(id)
+    if (detail === undefined) { sendJson(res, 404, { error: 'not-found' }); return }
+    sendJson(res, 200, {
+      user: detail,
+      wallet: options.store.getWallet(id),
+      bonuses: options.store.listBonuses(id),
+    })
+    return
+  }
+  const disabledMatch = /^users\/([^/]+)\/disabled$/u.exec(path)
+  if (disabledMatch !== null) {
+    if (req.method !== 'POST') { methodNotAllowed(res, 'POST'); return }
+    let id: string
+    try { id = decodeURIComponent(disabledMatch[1] as string) } catch { sendJson(res, 400, { error: 'invalid-id' }); return }
+    const request = parseJson(disabledRequest, await readBody(req))
+    if (!options.store.setUserDisabled(id, request.disabled)) { sendJson(res, 404, { error: 'not-found' }); return }
+    audit(options, operator, request.disabled ? 'user.disable' : 'user.enable', id,
+      JSON.stringify({ disabled: request.disabled }), now)
+    sendJson(res, 200, { ok: true })
+    return
+  }
+  if (path === 'grants') {
+    if (req.method !== 'GET') { methodNotAllowed(res, 'GET'); return }
+    sendJson(res, 200, options.store.listGrants(pageOf(url)))
+    return
+  }
+  const grantMatch = /^grants\/([^/]+)$/u.exec(path)
+  if (grantMatch !== null) {
+    if (req.method !== 'DELETE') { methodNotAllowed(res, 'DELETE'); return }
+    let tokenHash: string
+    try { tokenHash = decodeURIComponent(grantMatch[1] as string) } catch { sendJson(res, 400, { error: 'invalid-id' }); return }
+    if (!options.store.deleteGrant(tokenHash)) { sendJson(res, 404, { error: 'not-found' }); return }
+    audit(options, operator, 'grant.revoke', tokenHash, '{}', now)
+    sendJson(res, 200, { ok: true })
+    return
+  }
+  if (path === 'devices') {
+    if (req.method !== 'GET') { methodNotAllowed(res, 'GET'); return }
+    sendJson(res, 200, options.store.listDevices(pageOf(url)))
+    return
+  }
+  if (path === 'attempts') {
+    if (req.method !== 'GET') { methodNotAllowed(res, 'GET'); return }
+    sendJson(res, 200, options.store.listAttempts(pageOf(url)))
+    return
+  }
+  if (path === 'wallets') {
+    if (req.method !== 'GET') { methodNotAllowed(res, 'GET'); return }
+    sendJson(res, 200, options.store.listWallets(pageOf(url)))
+    return
+  }
+  const walletMatch = /^wallets\/([^/]+)$/u.exec(path)
+  if (walletMatch !== null) {
+    if (req.method !== 'GET') { methodNotAllowed(res, 'GET'); return }
+    let userId: string
+    try { userId = decodeURIComponent(walletMatch[1] as string) } catch { sendJson(res, 400, { error: 'invalid-id' }); return }
+    const detail = options.store.findUser(userId)
+    if (detail === undefined) { sendJson(res, 404, { error: 'not-found' }); return }
+    sendJson(res, 200, {
+      user: detail,
+      wallet: options.store.getWallet(userId),
+      bonuses: options.store.listBonuses(userId),
+    })
+    return
+  }
+  const balanceMatch = /^wallets\/([^/]+)\/balance$/u.exec(path)
+  if (balanceMatch !== null) {
+    if (req.method !== 'POST') { methodNotAllowed(res, 'POST'); return }
+    let userId: string
+    try { userId = decodeURIComponent(balanceMatch[1] as string) } catch { sendJson(res, 400, { error: 'invalid-id' }); return }
+    const request = parseJson(balanceRequest, await readBody(req))
+    if (options.store.findUser(userId) === undefined) { sendJson(res, 404, { error: 'not-found' }); return }
+    const wallet = options.store.setWalletBalance(userId, parseCents(request.balance), now)
+    audit(options, operator, 'wallet.balance', userId, JSON.stringify({ balance: request.balance }), now)
+    sendJson(res, 200, { wallet })
+    return
+  }
+  const bonusMatch = /^wallets\/([^/]+)\/bonuses$/u.exec(path)
+  if (bonusMatch !== null) {
+    if (req.method !== 'POST') { methodNotAllowed(res, 'POST'); return }
+    let userId: string
+    try { userId = decodeURIComponent(bonusMatch[1] as string) } catch { sendJson(res, 400, { error: 'invalid-id' }); return }
+    const request = parseJson(adminBonusRequest, await readBody(req))
+    if (options.store.findUser(userId) === undefined) { sendJson(res, 404, { error: 'not-found' }); return }
+    const expiresInDays = request.expiresInDays ?? 30
+    const bonus = options.store.addBonus(userId, parseCents(request.amount), request.title, request.message,
+      now + expiresInDays * 86_400_000, now)
+    audit(options, operator, 'bonus.grant', userId,
+      JSON.stringify({ amount: request.amount, title: request.title, expiresInDays }), now)
+    sendJson(res, 200, { bonus })
+    return
+  }
+  if (path === 'audit') {
+    if (req.method !== 'GET') { methodNotAllowed(res, 'GET'); return }
+    sendJson(res, 200, options.store.listAudit(pageOf(url)))
+    return
+  }
+  sendJson(res, 404, { error: 'not-found' })
 }
 
 async function handle(req: IncomingMessage, res: ServerResponse, options: ApiOptions, now: () => number): Promise<void> {
   const clock = now()
   const url = new URL(req.url ?? '/', options.config.platformOrigin)
+  if (url.pathname.startsWith('/admin-api/')) {
+    if (!adminAuthorized(req, options)) { sendJson(res, 401, { error: 'unauthorized' }); return }
+    await adminRoute(req, res, options, clock, url)
+    return
+  }
   const internal = /^\/internal\/attempts\/([^/]+)(\/decision)?$/u.exec(url.pathname)
   if (internal !== null) {
     if (!internalAuthorized(req, options)) { sendJson(res, 401, { error: 'unauthorized' }); return }

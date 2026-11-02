@@ -13,6 +13,7 @@ const internalToken = 'test-internal-token'
 const config: Config = {
   platformOrigin,
   internalToken,
+  adminToken: 'test-admin-token',
   host: '127.0.0.1',
   port: 0,
   dataDir: '',
@@ -145,7 +146,10 @@ describe('account protocol', () => {
     })
 
     const summary = await fetch(`${base}/api/v0/users/get_user_summary`, { headers: { 'x-dsh-auth-token': grant.token } })
-    expect((await json(summary)).data.biz_data).toMatchObject({ normal_wallets: [{ currency: 'CNY', balance: '0.00' }] })
+    expect((await json(summary)).data.biz_data).toMatchObject({
+      normal_wallets: [{ currency: 'CNY', balance: '0.00' }],
+      bonus_wallets: [{ currency: 'CNY', balance: '0.00' }],
+    })
 
     const logout = await fetch(`${base}/auth-api/v0/users/logout`, {
       method: 'POST', headers: { 'x-dsh-auth-token': grant.token },

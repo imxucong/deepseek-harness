@@ -1,0 +1,25 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write apps/topask-admin/README.md
+/topask-admin:
+  en: f9bc20f2d6297e33
+  zh: d9e648bca7d89d7c
+/topask-admin/summary:
+  en: 923286ae152e61be
+  zh: 9515562baa169eb7
+/topask-admin/routes:
+  en: 55a67ff640d1ce40
+  zh: 65cd38b9e5f73a8f
+/topask-admin/configuration:
+  en: 1ec8d4ba333b4d07
+  zh: 9d9626deadd5df4a
+/topask-admin/security:
+  en: cc269086dd4dbee9
+  zh: cafeb4ebd6049665
+/topask-admin/run-locally:
+  en: 545a94c7dab28c9c
+  zh: 281aa29004dc9305
+/topask-admin/known-limitations-and-deferred-work:
+  en: 16c72eb8e27c382c
+  zh: 4ab9c1c5655ed98c
