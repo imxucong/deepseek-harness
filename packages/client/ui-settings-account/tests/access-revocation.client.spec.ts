@@ -291,7 +291,7 @@ it('closes the sign-in dialog, its failure, and the pending authorization tab on
     grant(b.guards)
     await b.accepted[0]
     b.startSignIn.mockResolvedValueOnce({ ok: false })
-    await expect(b.operations().start()).rejects.toThrow('account start failed')
+    await expect(b.operations().start('deepseek')).rejects.toThrow('account start failed')
     expect(b.operations().hooks.account.getSnapshot()).toMatchObject({ loginVisible: true, loginFailed: true })
     revoke(b.guards)
     expect(b.operations().hooks.account.getSnapshot().loginVisible).toBe(false)
@@ -301,7 +301,7 @@ it('closes the sign-in dialog, its failure, and the pending authorization tab on
     await b.accepted[1]
     popup.close.mockClear()
     b.startSignIn.mockReturnValueOnce(new Promise(() => {}))
-    void b.operations().start()
+    void b.operations().start('deepseek')
     expect(open).toHaveBeenCalledTimes(2)
     revoke(b.guards)
     expect(popup.close).toHaveBeenCalledOnce()

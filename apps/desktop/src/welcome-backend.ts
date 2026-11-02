@@ -1,6 +1,7 @@
 import type { ProductEvent } from '@deepseek-ai/dsh-client-product-analytics/types'
 /** Native welcome operations using the shared Web authentication and RPC APIs. */
 
+import type { AccountProviderId } from '@deepseek-ai/dsh-deepseek-account/types'
 import { randomUUID } from 'node:crypto'
 import { desktopAccountBackend, type DesktopAccountBackend } from './account-backend.ts'
 
@@ -113,8 +114,14 @@ export async function connectDesktopWelcome(
       Object.assign(states, batch)
     }
     if (ref !== undefined && !record(states[ref])) throw new Error('desktop welcome: missing credential metadata')
+    const accountProviders: AccountProviderId[] = await account.providers().catch(() => ['deepseek'])
+    let loggedIn = false
+    for (const provider of accountProviders) {
+      const state = await account.state(provider).catch(() => undefined)
+      if (state?.status === 'credential-stored') { loggedIn = true; break }
+    }
     return {
-      loggedIn: (await account.state()).status === 'credential-stored',
+      loggedIn,
       hasApiKey: Object.values(states).some(value => record(value) && value.configured === true),
       writable: ref !== undefined && record(states[ref]) && states[ref].writable === true,
       localePreference: localePreference(namespaces),

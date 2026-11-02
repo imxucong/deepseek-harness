@@ -52,8 +52,13 @@ export function AccountMenu({
     catch (_error) { setSignOutImpact('unknown'); setOpen(false) }
     finally { setBusy(false) }
   }
-  // The plugin's start publishes `loginFailed` before it rejects, so the dialog owns the report.
-  const beginSignIn = (): void => { setOpen(false); void start().catch(() => undefined) }
+  // With one provider the menu starts it directly; two or more open the chooser.
+  const beginSignIn = (): void => {
+    setOpen(false)
+    const choices = account.providers ?? ['deepseek']
+    if (choices.length > 1) { showLogin(true); return }
+    void start(choices[0] ?? 'deepseek').catch(() => undefined)
+  }
   return <div ref={anchor} className={css.root} data-inset={signedIn && wide}>
     {signInNotice > 0 && <Toast key={signInNotice} text={t('modelSignInRequired')} onDone={() => { setSignInNotice(0) }} />}
     {expiryNotice && <Toast text={t('sessionExpired')} onDone={() => { setExpiryNotice(false) }} />}

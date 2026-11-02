@@ -37,7 +37,7 @@ product/run.sh topask --port 8080 --no-open
 
 ## What stays DeepSeek
 
-The composition keeps the shipped model routes, DeepSeek account, credentials, tools, session persistence, sandbox policy, and telemetry. TopAsk is a brand layer, not a provider fork.
+The composition keeps the shipped model routes, DeepSeek account, credentials, tools, session persistence, sandbox policy, and telemetry. TopAsk adds a brand layer and a second account provider row (`topask-account`) that speaks the same Platform protocol against the TopAsk account service; the shipped DeepSeek row remains mounted so either sign-in entry can be used. TopAsk is not a model-provider fork.
 
 To replace the model route later, patch `agent-default-model` and `llm-pi-ai` in `product/dsh-topask/cordis.patch.yml`; that is a separate product decision from this brand layer.
 

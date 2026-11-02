@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { Button, IconCloseOutlineRegular, IconLoadingOutlineRegular, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { AccountSnapshot } from './AccountSection.tsx'
-import type { SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
+import type { AccountProviderId, SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
 import type { AccountKey } from './locales.ts'
 import { authorizeUrlWithTheme } from './authorize-url.ts'
 import css from './SignInDialog.module.css'
@@ -12,7 +12,7 @@ export function SignInDialog({ account, colorScheme, start, cancel, close, useAp
   account: AccountSnapshot
   /** Resolved scheme of the active application theme; the copied link carries it. */
   colorScheme: 'light' | 'dark'
-  start: () => Promise<void>
+  start: (provider: AccountProviderId) => Promise<void>
   cancel: (id: SignInAttemptId) => Promise<void>
   close: () => void
   useApiKey: () => void
@@ -20,6 +20,7 @@ export function SignInDialog({ account, colorScheme, start, cancel, close, useAp
 }) {
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
+  const [chosen, setChosen] = useState<AccountProviderId | undefined>(undefined)
   const [copyResult, setCopyResult] = useState<{ messageKey: 'copiedLink' | 'copyFailed' } | null>(null)
   const attempt = account.view?.attempt
   useEffect(() => { setCopyResult(null) }, [attempt?.id, attempt?.authorizeUrl])
@@ -51,8 +52,10 @@ export function SignInDialog({ account, colorScheme, start, cancel, close, useAp
   }
   const retry = async () => {
     if (active && attempt) await cancel(attempt.id)
-    await start()
+    await start(chosen ?? account.provider ?? 'deepseek')
   }
+  const providerLabel = (provider: AccountProviderId): string =>
+    t(provider === 'topask' ? 'providerTopask' : 'providerDeepseek')
   const copyLink = async (authorizeUrl: string) => {
     try {
       await navigator.clipboard.writeText(authorizeUrlWithTheme(authorizeUrl, colorScheme))
@@ -77,13 +80,27 @@ export function SignInDialog({ account, colorScheme, start, cancel, close, useAp
         {error ? t(failureKey) : expired ? t('timeoutDescription') : t('loginDescription')}
       </p>}
     </div>
-    <div className={css.actions}>
+    {active || expired || error ? <div className={css.actions}>
       <Button variant="outline" className={css.secondaryButton} disabled={committing || busy}
         onClick={active ? dismiss : useApiKey}>{t(active ? 'cancel' : 'addApiKey')}</Button>
       <Button variant="primary" className={css.primaryButton} disabled={busy || committing || waiting || account.view === undefined}
         aria-label={waiting ? t('waiting') : undefined} onClick={() => { void run(retry) }}>
         {waiting ? <IconLoadingOutlineRegular className={css.spinner} /> : t(expired || error ? 'retry' : 'signIn')}
       </Button>
-    </div>
+    </div> : <>
+      <div className={css.actions}>
+        {(account.providers ?? ['deepseek']).map(provider => <Button key={provider}
+          variant={provider === 'topask' ? 'primary' : 'outline'}
+          className={provider === 'topask' ? css.primaryButton : css.secondaryButton}
+          disabled={committing || account.view === undefined}
+          onClick={() => { setChosen(provider); void run(() => start(provider)) }}>
+          {providerLabel(provider)}
+        </Button>)}
+      </div>
+      <div className={css.actions}>
+        <Button variant="outline" className={css.secondaryButton} disabled={committing}
+          onClick={useApiKey}>{t('addApiKey')}</Button>
+      </div>
+    </>}
   </Modal>
 }

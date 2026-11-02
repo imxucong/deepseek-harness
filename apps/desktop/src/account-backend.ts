@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto'
 import WebSocket from 'ws'
 import { parseRemoteStreamServerMessage, REMOTE_STREAM_MUX_PATH } from '@deepseek-ai/dsh-api-gateway/stream-protocol'
-import type { AccountClientMetadata, AccountView, SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
+import type { AccountClientMetadata, AccountProviderId, AccountView, SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
 
 /** Authenticated unary caller shared with native onboarding. */
 export type AccountInvoke = (request: { namespace: string; method: string; args: Record<string, unknown> }) => Promise<unknown>
@@ -55,25 +55,39 @@ function validateBrowserDestination(value: string): void {
 
 /** Native account operations and explicitly owned stream lifetime. */
 export interface DesktopAccountBackend {
-  /** @returns current account snapshot. */
-  state(): Promise<AccountView>
-  /** @param client - this window's identity and current language. @returns new or already-running login attempt. */
-  start(client: AccountClientMetadata): Promise<AccountView>
-  /** @param id - attempt to cancel. @returns cancellation or completed commit state. */
-  cancel(id: SignInAttemptId): Promise<AccountView>
-  /** @param client - this window's identity. @returns state after local sign-out. */
-  signOut(client: AccountClientMetadata): Promise<AccountView>
+  /** @returns account providers this Host mounts, in display order. */
+  providers(): Promise<AccountProviderId[]>
+  /** @param provider - account backend to read. @returns current account snapshot. */
+  state(provider: AccountProviderId): Promise<AccountView>
   /**
-   * @param listener - state recipient.
+   * @param client - this window's identity and current language.
+   * @param provider - account backend to use.
+   * @returns new or already-running login attempt.
+   */
+  start(client: AccountClientMetadata, provider: AccountProviderId): Promise<AccountView>
+  /** @param id - attempt to cancel. @param provider - account backend owning it. @returns cancellation or completed commit state. */
+  cancel(id: SignInAttemptId, provider: AccountProviderId): Promise<AccountView>
+  /** @param client - this window's identity. @param provider - account backend to sign out from. @returns state after local sign-out. */
+  signOut(client: AccountClientMetadata, provider: AccountProviderId): Promise<AccountView>
+  /**
+   * @param listener - state recipient tagged with its provider.
    * @param failed - stream failure recipient.
-   * @param expired - live credential-expiry recipient.
+   * @param expired - live credential-expiry recipient, tagged with the provider whose expiry stream is open.
    * @param onAnalyticsEnabledChanged - optional Desktop collection-policy recipient; disconnected streams publish false.
    * @returns stream disposer.
    */
   watch(
-    listener: (state: AccountView) => void, failed: () => void, expired: () => void,
+    listener: (provider: AccountProviderId, state: AccountView) => void, failed: () => void,
+    expired: (provider: AccountProviderId) => void,
     onAnalyticsEnabledChanged?: (enabled: boolean) => void,
   ): () => void
+}
+
+/** Providers this build can address; an unknown value never reaches the wire. */
+function providerList(value: unknown): AccountProviderId[] {
+  if (!Array.isArray(value)) throw new Error('desktop account: invalid provider list')
+  const providers = value.filter((item): item is AccountProviderId => item === 'deepseek' || item === 'topask')
+  return providers.length === 0 ? ['deepseek'] : providers
 }
 
 /**
@@ -84,48 +98,63 @@ export interface DesktopAccountBackend {
  * @returns account operations; watch callers own their subscriptions.
  */
 export function desktopAccountBackend(origin: string, invoke: AccountInvoke, cookies: () => Promise<string>): DesktopAccountBackend {
-  const call = async (method: string, args: Record<string, unknown> = {}): Promise<AccountView> =>
-    accountView(await invoke({ namespace: 'account', method, args }))
+  const call = async (provider: AccountProviderId, method: string,
+    args: Record<string, unknown> = {}): Promise<AccountView> =>
+    accountView(await invoke({ namespace: 'account', method, args: { provider, ...args } }))
+  const readProviders = async (): Promise<AccountProviderId[]> =>
+    providerList(await invoke({ namespace: 'account', method: 'providers', args: {} }))
   return {
-    state: () => call('getState'),
-    start: client => call('startSignIn', { client, callbackOrigin: new URL(origin).origin, loginSource: 'desktop' }),
-    cancel: attemptId => call('cancelSignIn', { attemptId }), signOut: client => call('signOut', { client }),
+    providers: readProviders,
+    state: provider => call(provider, 'getState'),
+    start: (client, provider) => call(provider, 'startSignIn', { client, callbackOrigin: new URL(origin).origin, loginSource: 'desktop' }),
+    cancel: (attemptId, provider) => call(provider, 'cancelSignIn', { attemptId }),
+    signOut: (client, provider) => call(provider, 'signOut', { client }),
     watch(listener, failed, expired, onAnalyticsEnabledChanged) {
       let closed = false
       let socket: WebSocket | undefined
       let retry: ReturnType<typeof setTimeout> | undefined
       const connect = (): void => {
-        const streamId = randomUUID()
-        const expiryStreamId = randomUUID()
-        const analyticsPolicyStreamId = randomUUID()
-        void cookies().then((cookie) => {
+        void (async () => {
+          const mounted = await readProviders().catch(() => ['deepseek'] as AccountProviderId[])
           if (closed) return
-          const url = new URL(REMOTE_STREAM_MUX_PATH, origin)
-          url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-          socket = new WebSocket(url, { headers: { cookie, origin }, maxPayload: 65_536 })
-          socket.on('open', () => {
-            if (onAnalyticsEnabledChanged !== undefined) socket?.send(JSON.stringify({ type: 'open', streamId: analyticsPolicyStreamId, endpoint: 'productAnalytics/watchPolicy', payload: { args: {} } }))
-            socket?.send(JSON.stringify({ type: 'open', streamId: expiryStreamId, endpoint: 'account/watchExpiry', payload: { args: {} } }))
-            socket?.send(JSON.stringify({ type: 'open', streamId, endpoint: 'account/watch', payload: { args: {} } }))
-          })
-          socket.on('message', (data) => {
-            try {
-              const bytes = Array.isArray(data) ? Buffer.concat(data) : Buffer.isBuffer(data) ? data : Buffer.from(data)
-              const frame = parseRemoteStreamServerMessage(bytes.toString('utf8'))
-              if (frame.streamId === analyticsPolicyStreamId) {
-                if (frame.type === 'item' && typeof frame.value === 'boolean') onAnalyticsEnabledChanged?.(frame.value)
-                else onAnalyticsEnabledChanged?.(false)
-                return
+          void cookies().then((cookie) => {
+            if (closed) return
+            const url = new URL(REMOTE_STREAM_MUX_PATH, origin)
+            url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+            socket = new WebSocket(url, { headers: { cookie, origin }, maxPayload: 65_536 })
+            const watches = new Map<string, AccountProviderId>()
+            const expiryProvider = mounted[0] ?? 'deepseek'
+            const expiryStreamId = randomUUID()
+            const analyticsPolicyStreamId = randomUUID()
+            socket.on('open', () => {
+              if (onAnalyticsEnabledChanged !== undefined) socket?.send(JSON.stringify({ type: 'open', streamId: analyticsPolicyStreamId, endpoint: 'productAnalytics/watchPolicy', payload: { args: {} } }))
+              socket?.send(JSON.stringify({ type: 'open', streamId: expiryStreamId, endpoint: 'account/watchExpiry', payload: { args: { provider: expiryProvider } } }))
+              for (const provider of mounted) {
+                const streamId = randomUUID()
+                watches.set(streamId, provider)
+                socket?.send(JSON.stringify({ type: 'open', streamId, endpoint: 'account/watch', payload: { args: { provider } } }))
               }
-              if (frame.streamId === expiryStreamId && frame.type === 'item' && frame.value === 'session-expired') { expired(); return }
-              if (frame.streamId !== streamId) throw new Error('desktop account: unexpected stream')
-              if (frame.type === 'item') listener(accountView(frame.value))
-              else socket?.close()
-            } catch { socket?.close() }
-          })
-          socket.on('error', () => { socket?.close() })
-          socket.on('close', () => { if (!closed) { onAnalyticsEnabledChanged?.(false); failed(); retry = setTimeout(connect, 1000) } })
-        }).catch(() => { if (!closed) { onAnalyticsEnabledChanged?.(false); failed(); retry = setTimeout(connect, 1000) } })
+            })
+            socket.on('message', (data) => {
+              try {
+                const bytes = Array.isArray(data) ? Buffer.concat(data) : Buffer.isBuffer(data) ? data : Buffer.from(data)
+                const frame = parseRemoteStreamServerMessage(bytes.toString('utf8'))
+                if (frame.streamId === analyticsPolicyStreamId) {
+                  if (frame.type === 'item' && typeof frame.value === 'boolean') onAnalyticsEnabledChanged?.(frame.value)
+                  else onAnalyticsEnabledChanged?.(false)
+                  return
+                }
+                if (frame.streamId === expiryStreamId && frame.type === 'item' && frame.value === 'session-expired') { expired(expiryProvider); return }
+                const provider = watches.get(frame.streamId)
+                if (provider === undefined) throw new Error('desktop account: unexpected stream')
+                if (frame.type === 'item') listener(provider, accountView(frame.value))
+                else socket?.close()
+              } catch { socket?.close() }
+            })
+            socket.on('error', () => { socket?.close() })
+            socket.on('close', () => { if (!closed) { onAnalyticsEnabledChanged?.(false); failed(); retry = setTimeout(connect, 1000) } })
+          }).catch(() => { if (!closed) { onAnalyticsEnabledChanged?.(false); failed(); retry = setTimeout(connect, 1000) } })
+        })()
       }
       connect()
       return () => { closed = true; onAnalyticsEnabledChanged?.(false); clearTimeout(retry); socket?.close() }

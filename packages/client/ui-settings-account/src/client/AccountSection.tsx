@@ -2,7 +2,7 @@
 import { Big } from 'big.js'
 import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import { Button, IconRightUpOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { AccountDetails, AccountView, SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
+import type { AccountDetails, AccountView, AccountProviderId, SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
 import type { PropsRuntime, PropsLocale, InjectFace, HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ThemeSnapshot } from '@deepseek-ai/dsh-client-ui-theme/client'
 import type { PlatformPage, PlatformPages } from './platform-pages.ts'
@@ -20,6 +20,10 @@ export interface AccountSnapshot {
 
   /** Latest Host state, absent until the stream responds. */
   view: AccountView | undefined
+  /** Provider whose account this snapshot exposes; absent before the first Host frame. */
+  provider?: AccountProviderId
+  /** Providers this Host mounts, in display order; absent until the Host answers. */
+  providers?: readonly AccountProviderId[]
   /** Sanitized profile and balance query outcomes, absent while loading. */
   details: Partial<AccountDetails> | undefined
   /** Shared picture load; absent until a profile supplies a picture or after sign-out. */
@@ -77,8 +81,8 @@ export interface AccountSectionInjected {
   bonusNoticeShown: (orderId: BonusNotice['orderId']) => void
   /** @param orderId - notice the user closed. */
   bonusNoticeDismissed: (orderId: BonusNotice['orderId']) => void
-  /** @returns after the login attempt is created. */
-  start: () => Promise<void>
+  /** @param provider - account backend to sign in to. @returns after the login attempt is created. */
+  start: (provider: AccountProviderId) => Promise<void>
   /** @param id - attempt to cancel. @returns after cancellation or an already-admitted commit. */
   cancel: (id: SignInAttemptId) => Promise<void>
   /** @returns whether a running task currently uses the account token. */
@@ -90,8 +94,8 @@ export interface AccountSectionInjected {
 export type AccountSectionProps =
   PropsRuntime<'settings.section'> & PropsLocale<'settings.account'> & InjectFace<AccountSectionInjected>
 /** @param props - localized actions, account subscription, and the shared Platform page channel. @returns account settings UI. */
-export function AccountSection({ t, useAccount, useTheme, start, cancel, openPlatformPage, avatarFailed }: AccountSectionProps) {
-  const { view: state, details, avatar, failed: streamFailed } = useAccount(value => value)
+export function AccountSection({ t, useAccount, useTheme, showLogin, start, cancel, openPlatformPage, avatarFailed }: AccountSectionProps) {
+  const { view: state, providers, details, avatar, failed: streamFailed } = useAccount(value => value)
   const colorScheme = useTheme(snapshot => snapshot.active.colorScheme)
   // The shared host owns the native view; this page holds only its own request,
   // and only while it is the latest owner.
@@ -156,7 +160,11 @@ export function AccountSection({ t, useAccount, useTheme, start, cancel, openPla
           </span>
         </div>
         <Button variant="primary" className={css.signInButton} disabled={busy || state === undefined}
-          onClick={() => { void run(start) }}>{t('signIn')}</Button>
+          onClick={() => {
+            const choices = providers ?? ['deepseek']
+            if (choices.length > 1) { showLogin(true); return }
+            void run(() => start(choices[0] ?? 'deepseek'))
+          }}>{t('signIn')}</Button>
       </div>
     </section>
   )

@@ -1,6 +1,6 @@
 /** Operations available to the isolated native welcome renderer. */
 
-import type { AccountView, SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
+import type { AccountProviderId, AccountView, SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
 import type { ProductEventMap } from '@deepseek-ai/dsh-client-product-analytics/types'
 import type { DesktopLocale } from './locale.ts'
 
@@ -10,6 +10,7 @@ export const WELCOME_IPC = {
   analytics: 'dsh-welcome:analytics',
   analyticsEnabled: 'dsh-welcome:analytics-enabled',
   skip: 'dsh-welcome:skip',
+  providers: 'dsh-welcome:providers',
   start: 'dsh-welcome:start',
   cancel: 'dsh-welcome:cancel',
   copyLink: 'dsh-welcome:copy-link',
@@ -33,12 +34,17 @@ export interface WelcomeOperations {
   analyticsEnabled(): Promise<boolean>
   /** @returns the pending notification, clearing it before another renderer can receive it. */
   takeNotice(): Promise<WelcomeNotice | undefined>
-  /** @returns account state after starting a login attempt. */
-  startSignIn(): Promise<AccountView>
-  /** @param id - attempt to cancel. @returns the settled state. */
-  cancelSignIn(id: SignInAttemptId): Promise<AccountView>
-  /** @param id - current waiting attempt whose authorization URL is copied to the system clipboard. */
-  copySignInLink(id: SignInAttemptId): Promise<void>
+  /** @returns account providers this Host mounts, in display order. */
+  providers(): Promise<AccountProviderId[]>
+  /** @param provider - account backend to sign in to. @returns account state after starting a login attempt. */
+  startSignIn(provider: AccountProviderId): Promise<AccountView>
+  /** @param provider - account backend owning the attempt. @param id - attempt to cancel. @returns the settled state. */
+  cancelSignIn(provider: AccountProviderId, id: SignInAttemptId): Promise<AccountView>
+  /**
+   * @param provider - account backend owning the attempt.
+   * @param id - current waiting attempt whose authorization URL is copied to the system clipboard.
+   */
+  copySignInLink(provider: AccountProviderId, id: SignInAttemptId): Promise<void>
 
   /**
    * Store the official provider's key before entering the workspace.
@@ -55,8 +61,8 @@ export interface WelcomeOperations {
 
 /** The renderer receives localized copy, login operations, and safe account snapshots. */
 export type WelcomeApi = DesktopLocale & WelcomeOperations & {
-  /** @param listener - safe account snapshot recipient. @returns subscription disposer. */
-  onAccountState(listener: (state: AccountView) => void): () => void
+  /** @param listener - safe account snapshot recipient tagged with its provider. @returns subscription disposer. */
+  onAccountState(listener: (provider: AccountProviderId, state: AccountView) => void): () => void
 }
 
 /** Authentication facts supplied at cold start or after a completed sign-out. */

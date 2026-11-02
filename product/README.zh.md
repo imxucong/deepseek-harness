@@ -37,7 +37,7 @@ product/run.sh topask --port 8080 --no-open
 
 ## 保留的 DeepSeek 部分
 
-该组合保留已发布的模型路由、DeepSeek 账号、凭据、工具、会话持久化、沙箱策略与遥测。TopAsk 是品牌层，不是模型提供方分叉。
+该组合保留已发布的模型路由、DeepSeek 账号、凭据、工具、会话持久化、沙箱策略与遥测。TopAsk 增加品牌层与第二个账号 Provider 行（`topask-account`），它使用同一套 Platform 协议对接 TopAsk 账号服务；随包发布的 DeepSeek 行仍然挂载，两个登录入口都可使用。TopAsk 不是模型提供方分叉。
 
 后续如需替换模型路由，在 `product/dsh-topask/cordis.patch.yml` 中 patch `agent-default-model` 与 `llm-pi-ai`；这与当前品牌层是相互独立的产品决策。
 

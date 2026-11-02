@@ -3,6 +3,9 @@ import type {} from '@deepseek-ai/cordis'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 
+/** Account backend a client can sign in to. */
+export type AccountProviderId = 'deepseek' | 'topask'
+
 /** Identity of the requesting UI for one account operation; the Host derives Platform request headers from it. */
 export interface AccountClientMetadata {
   readonly version: string
