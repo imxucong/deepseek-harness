@@ -1,20 +1,9 @@
-/** Browser pages for the account API: one branded shell shared by every HTML response. */
-import { escapeHtml } from './envelope.ts'
-import type { AttemptRecord, UserRecord } from './store.ts'
+/** Authorization pages: one branded shell shared by consent, completion, and notices. */
+import type { AttemptView } from './api.ts'
+import { escapeHtml } from './html.ts'
+import type { PageLocale } from './locale.ts'
 
-/** Language one browser page renders. */
-export type PageLocale = 'zh' | 'en'
-
-/**
- * Resolve the page language from a Platform locale tag.
- * @param value - locale such as `zh_CN`, `en_US`, an unsupported tag, or an empty string.
- * @returns `zh` for Chinese tags and the missing value, otherwise `en`.
- */
-export function localeFrom(value: string | undefined): PageLocale {
-  return value === undefined || value.trim() === '' || value.toLowerCase().startsWith('zh') ? 'zh' : 'en'
-}
-
-/** Failure or placeholder page identity. */
+/** Failure page identity. */
 export type NoticeKind =
   | 'missing'
   | 'not-found'
@@ -23,8 +12,6 @@ export type NoticeKind =
   | 'invalid-confirmation'
   | 'state-mismatch'
   | 'cancelled'
-  | 'usage'
-  | 'top-up'
 
 interface Copy {
   readonly lang: 'zh-CN' | 'en'
@@ -64,12 +51,10 @@ const COPY: Readonly<Record<PageLocale, Copy>> = {
       missing: ['登录请求无效', '缺少登录请求标识，请返回应用重试。'],
       'not-found': ['登录请求不存在', '该登录请求不存在或已失效，请返回应用重新发起登录。'],
       expired: ['登录请求已过期', '请返回应用重新发起登录。'],
-      unavailable: ['账号数据不可用', '请稍后重试，或返回应用重新发起登录。'],
+      unavailable: ['登录服务暂不可用', '请稍后重试，或返回应用重新发起登录。'],
       'invalid-confirmation': ['无效的登录确认', '请返回应用重新发起登录。'],
       'state-mismatch': ['登录状态不匹配', '请返回应用重新发起登录。'],
       cancelled: ['已取消登录', '你可以关闭此页面。'],
-      usage: ['用量页面暂未开放', '开发模式尚未接入用量页面。'],
-      'top-up': ['充值页面暂未开放', '开发模式尚未接入充值页面。'],
     },
   },
   en: {
@@ -91,12 +76,10 @@ const COPY: Readonly<Record<PageLocale, Copy>> = {
       missing: ['Invalid sign-in request', 'The request is missing its identifier. Return to the app and try again.'],
       'not-found': ['Sign-in request not found', 'This request does not exist or is no longer valid. Return to the app and start again.'],
       expired: ['Sign-in request expired', 'Return to the app and start again.'],
-      unavailable: ['Account data unavailable', 'Try again shortly, or return to the app and start again.'],
+      unavailable: ['Sign-in service unavailable', 'Try again shortly, or return to the app and start again.'],
       'invalid-confirmation': ['Invalid confirmation', 'Return to the app and start again.'],
       'state-mismatch': ['Sign-in state mismatch', 'Return to the app and start again.'],
       cancelled: ['Sign-in cancelled', 'You can close this page.'],
-      usage: ['Usage page unavailable', 'The development build does not serve a usage page yet.'],
-      'top-up': ['Top-up page unavailable', 'The development build does not serve a top-up page yet.'],
     },
   },
 }
@@ -207,7 +190,7 @@ interface PageOptions {
 }
 
 /**
- * Render one complete page in the shared account shell.
+ * Render one complete authorization page in the shared shell.
  * @param options - locale, copy, and optional content slots.
  * @returns a complete HTML document.
  */
@@ -233,21 +216,21 @@ function renderPage(options: PageOptions): string {
 
 /**
  * Render the account-consent page that approves one browser attempt.
- * @param attempt - attempt whose hidden fields the form submits.
- * @param user - development identity the page presents.
+ * @param attempt - attempt facts read from the account API.
  * @param locale - page language.
  * @returns a complete HTML document.
  */
-export function authorizePage(attempt: AttemptRecord, user: UserRecord, locale: PageLocale): string {
+export function authorizePage(attempt: AttemptView, locale: PageLocale): string {
   const copy = COPY[locale]
-  const initial = Array.from(user.name.trim())[0] ?? 'T'
+  const initial = Array.from(attempt.user.name.trim())[0] ?? 'T'
   const content = '<div class="identity">'
     + `<span class="avatar" aria-hidden="true">${escapeHtml(initial)}</span>`
-    + `<span class="identity-copy"><span class="identity-name">${escapeHtml(user.name)}</span>`
-    + `<span class="identity-email">${escapeHtml(user.email)}</span></span></div>`
+    + `<span class="identity-copy"><span class="identity-name">${escapeHtml(attempt.user.name)}</span>`
+    + `<span class="identity-email">${escapeHtml(attempt.user.email)}</span></span></div>`
   const actions = '<form class="actions" method="post" action="/dsh/authorize">'
     + `<input type="hidden" name="authorize_id" value="${escapeHtml(attempt.authorizeId)}">`
     + `<input type="hidden" name="state" value="${escapeHtml(attempt.state)}">`
+    + `<input type="hidden" name="locale" value="${locale === 'en' ? 'en_US' : 'zh_CN'}">`
     + `<button class="primary" type="submit" name="action" value="approve">${copy.approve}</button>`
     + `<button class="secondary" type="submit" name="action" value="deny">${copy.deny}</button></form>`
   return renderPage({
@@ -283,7 +266,7 @@ export function authorizedPage(locale: PageLocale, loginSource: string | null): 
 }
 
 /**
- * Render a failure or placeholder page.
+ * Render a failure page.
  * @param kind - which notice to present.
  * @param locale - page language.
  * @returns a complete HTML document.

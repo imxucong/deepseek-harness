@@ -3,26 +3,26 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write apps/topask-api/README.md
 /topask-api:
-  en: 5d51002c34730fe8
-  zh: 7dfd49448de8aed5
+  en: 91d762e807748e43
+  zh: 9f3bb4bf3e72482b
 /topask-api/summary:
-  en: 484f77d42602b991
-  zh: 7108a705020d7ab8
+  en: ec32209485806e1e
+  zh: 889e7b85f795b01c
 /topask-api/endpoints:
-  en: dfb85b08f8b3ae86
-  zh: 8e43cd4316ffd12f
-/topask-api/browser-pages:
-  en: b1dff36fe5530f42
-  zh: 8071a5854b8af573
+  en: 8be943f128efeb42
+  zh: cf202dc6b4102036
+/topask-api/endpoints/internal-endpoints:
+  en: 59a8252a7ac3f44a
+  zh: 6bd4d2baf0d86dd4
 /topask-api/configuration:
-  en: fb8392c1ba066bd3
-  zh: 2098460d255ce8fc
+  en: 2e5f0fd8ac07f749
+  zh: 835b9b9844c935c8
 /topask-api/connect-a-profile:
-  en: ba8b933b9ecb2b5f
-  zh: 62305afc64f0d07e
+  en: bc81de74ded6baef
+  zh: 5fd6af1dfc1791b4
 /topask-api/security:
-  en: a7a5c4cf3b8774cd
-  zh: 43ff0c60904cf8c3
+  en: 6e87ebe3e1337e51
+  zh: 724ca25f699a86b3
 /topask-api/known-limitations-and-deferred-work:
-  en: 4e559a13212518bf
-  zh: 406844840a6ec489
+  en: cf5c1b8530d8ee34
+  zh: f7ffc1829abdd9ce

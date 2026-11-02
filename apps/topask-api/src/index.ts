@@ -17,7 +17,7 @@ async function main(): Promise<void> {
   })
   const address = server.address()
   const port = typeof address === 'object' && address !== null ? address.port : config.port
-  console.log(`topask-api: listening on http://${config.host}:${port} (origin ${config.origin})`)
+  console.log(`topask-api: listening on http://${config.host}:${port} (platform ${config.platformOrigin})`)
 
   let closing = false
   const shutdown = (): void => {

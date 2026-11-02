@@ -24,7 +24,7 @@
         providerLabel: TopAsk
         credentialScope: topask-account-platform
         callbackPath: /oauth/topask/callback
-        platformOrigin: !!js process.env.TOPASK_API_ORIGIN ?? 'http://127.0.0.1:8790'
+        platformOrigin: !!js process.env.TOPASK_PLATFORM_ORIGIN ?? 'http://127.0.0.1:8791'
         inferenceOrigin: !!js process.env.TOPASK_INFERENCE_ORIGIN ?? 'http://127.0.0.1:8790'
         # Development default: the service runs on loopback HTTP. Production
         # deployments use an HTTPS origin and set this to false.

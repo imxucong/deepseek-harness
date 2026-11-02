@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-11-02-topask-platform-admin-split.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-11-02-topask-platform-admin-split.md
+/agent-note-topask-public-platform-and-operator-console-split:
+  en: c4580853655ad128
+  zh: 5d0a65a94b9929b3
+/agent-note-topask-public-platform-and-operator-console-split/problem:
+  en: 5e9879e31d90740f
+  zh: c92eede4fcd0a442
+/agent-note-topask-public-platform-and-operator-console-split/decision:
+  en: 5db6f6205f949100
+  zh: 363d24b03548836e
+/agent-note-topask-public-platform-and-operator-console-split/alternatives-considered:
+  en: ea34f809fe29ed83
+  zh: 1a38f42deb2414f8
+/agent-note-topask-public-platform-and-operator-console-split/consequences:
+  en: 60d0dc47a99551e8
+  zh: cd073d1c3e243174
