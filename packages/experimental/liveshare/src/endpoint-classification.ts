@@ -89,6 +89,7 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'account/getState': 'owner-only', // owner account and sign-in; the served page never reads it
   'account/getUnnotifiedBonuses': 'owner-only', // owner account and sign-in; the served page never reads it
   'account/hasRunningAccountTasks': 'owner-only', // owner account and sign-in; the served page never reads it
+  'account/providers': 'owner-only', // owner account settings list mounted providers; the served page never reads it
   'account/signOut': 'owner-only', // owner account and sign-in; the served page never reads it
   'account/startSignIn': 'owner-only', // owner account and sign-in; the served page never reads it
   'account/watch': 'owner-only', // owner account and sign-in; the served page never reads it
